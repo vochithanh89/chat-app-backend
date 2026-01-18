@@ -6,13 +6,13 @@ import url from "node:url";
 export default {
     // path: __dirname + "/../", for AdonisJS v5
     path: path.dirname(url.fileURLToPath(import.meta.url)) + "/../", // for AdonisJS v6
-    title: "Foo", // use info instead
+    title: "Chat App API", // use info instead
     version: "1.0.0", // use info instead
     description: "", // use info instead
     tagIndex: 3,
     productionEnv: "production", // optional
     info: {
-        title: "title",
+        title: "Chat App API",
         version: "1.0.0",
         description: "",
     },

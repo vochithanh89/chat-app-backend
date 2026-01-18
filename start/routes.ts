@@ -29,15 +29,14 @@ router.get("/docs", async () => {
 
 router
     .group(() => {
-        router.post('/auth/login', [AuthController, 'login'])
-        router.post('/auth/register', [AuthController, 'register'])
-        router.get('/auth/verify-email', [AuthController, 'verifyEmail'])
-        router.post('/auth/refresh', [AuthController, 'refresh'])
+        router.post('/auth/login', [AuthController, 'login']).as('auth.login')
+        router.post('/auth/register', [AuthController, 'register']).as('auth.register')
+        router.post('/auth/refresh', [AuthController, 'refresh']).as('auth.refresh')
+        router.get('/auth/verify-email', [AuthController, 'verifyEmail']).as('auth.verifyEmail')
 
         router
             .group(() => {
-                router.get('/auth', [AuthController, 'me'])
-                router.get('/auth/me', [AuthController, 'meJwt'])
+                router.get('/auth/me', [AuthController, 'me']).as('auth.me')
             })
             .use(middleware.auth({ guards: ['jwt'] }))
             .use(middleware.emailVerified());

@@ -28,16 +28,6 @@ export default class AuthController {
      * @responseBody 200 - <User>
      */
     public async me({ auth }: HttpContext) {
-        return auth.getUserOrFail();
-    }
-
-    /**
-     * @meJwt
-     * @operationId getAuthenticatedUserJwt
-     * @description Returns the authenticated user using JWT.
-     * @responseBody 200 - <User>
-     */
-    public async meJwt({ auth }: HttpContext) {
         return auth.use('jwt').getUserOrFail();
     }
 
