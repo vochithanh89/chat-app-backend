@@ -35,6 +35,12 @@ export default class User extends compose(BaseModel, AuthFinder) {
   @column.dateTime()
   declare verifiedAt: DateTime | null
 
+  @column()
+  declare status: string
+
+  @column()
+  declare avatarUrl: string | null
+
   static refreshTokens = DbAccessTokensProvider.forModel(User, {
     prefix: 'rt_',
     table: 'jwt_refresh_tokens',

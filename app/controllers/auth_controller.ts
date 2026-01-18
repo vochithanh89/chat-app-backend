@@ -6,6 +6,11 @@ import { cuid } from '@adonisjs/core/helpers'
 import { DateTime } from 'luxon'
 import { userRegistrationValidator } from '#validators/user_registration'
 import { userLoginValidator } from '#validators/user_login'
+import db from '@adonisjs/lucid/services/db'
+import { forgotPasswordValidator } from '#validators/forgot_password'
+import { resetPasswordValidator } from '#validators/reset_password'
+import ForgotPasswordNotification from '#mails/forgot_password_notification'
+import { randomBytes } from 'crypto'
 
 export default class AuthController {
     /**
@@ -98,5 +103,61 @@ export default class AuthController {
         await user.save()
 
         return response.ok({ message: 'Email verified successfully.' })
+    }
+
+    /**
+     * @forgotPassword
+     * @operationId forgotPassword
+     * @description Sends a password reset email to the user.
+     * @requestBody {"email": "string"}
+     * @responseBody 200 - {"message": "string"}
+     */
+    public async forgotPassword({ request, response }: HttpContext) {
+        const { email } = await request.validateUsing(forgotPasswordValidator)
+        const user = await User.findBy('email', email)
+
+        if (!user) {
+            return response.ok({ message: 'If your email is registered, you will receive a password reset link.' })
+        }
+
+        const token = randomBytes(32).toString('hex')
+        await db.table('password_reset_tokens').insert({
+            email: user.email,
+            token: token,
+            created_at: DateTime.now().toISO(),
+        })
+
+        await mail.send(new ForgotPasswordNotification(user, token))
+
+        return response.ok({ message: 'Password reset email sent.' })
+    }
+
+    /**
+     * @resetPassword
+     * @operationId resetPassword
+     * @description Resets the user's password.
+     * @requestBody {"token": "string", "password": "string", "password_confirmation": "string"}
+     * @responseBody 200 - {"message": "string"}
+     */
+    public async resetPassword({ request, response }: HttpContext) {
+        const { token, password } = await request.validateUsing(resetPasswordValidator)
+
+        const resetRequest = await db.from('password_reset_tokens').where('token', token).first()
+
+        if (!resetRequest || DateTime.fromISO(resetRequest.created_at).plus({ minutes: 60 }) < DateTime.now()) {
+            return response.badRequest({ message: 'Invalid or expired password reset token.' })
+        }
+
+        const user = await User.findBy('email', resetRequest.email)
+        if (!user) {
+            return response.badRequest({ message: 'User not found.' })
+        }
+
+        user.password = password
+        await user.save()
+
+        await db.from('password_reset_tokens').where('token', token).delete()
+
+        return response.ok({ message: 'Password has been reset successfully.' })
     }
 }

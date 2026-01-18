@@ -14,6 +14,7 @@ import AutoSwagger from "adonis-autoswagger";
 import swagger from "#config/swagger";
 
 const AuthController = () => import('#controllers/auth_controller')
+const UsersController = () => import('#controllers/users_controller')
 
 // returns swagger in YAML
 router.get("/swagger", async () => {
@@ -29,16 +30,22 @@ router.get("/docs", async () => {
 
 router
     .group(() => {
+        // Auth routes
         router.post('/auth/login', [AuthController, 'login']).as('auth.login')
         router.post('/auth/register', [AuthController, 'register']).as('auth.register')
         router.post('/auth/refresh', [AuthController, 'refresh']).as('auth.refresh')
         router.get('/auth/verify-email', [AuthController, 'verifyEmail']).as('auth.verifyEmail')
+        router.post('/auth/forgot-password', [AuthController, 'forgotPassword']).as('auth.forgotPassword')
+        router.post('/auth/reset-password', [AuthController, 'resetPassword']).as('auth.resetPassword')
 
-        router
-            .group(() => {
-                router.get('/auth/me', [AuthController, 'me']).as('auth.me')
-            })
-            .use(middleware.auth({ guards: ['jwt'] }))
-            .use(middleware.emailVerified());
+        router.group(() => {
+            // User routes
+            router.get('/user/me', [UsersController, 'me']).as('users.me')
+            router.put('/user/profile', [UsersController, 'updateProfile']).as('users.updateProfile')
+            router.get('/users/:id', [UsersController, 'show']).as('users.show')
+            router.put('/users/:id', [UsersController, 'update']).as('users.update')
+            router.put('/users/avatar', [UsersController, 'updateAvatar']).as('users.updateAvatar')
+            router.put('/users/status', [UsersController, 'updateStatus']).as('users.updateStatus')
+        }).use(middleware.auth({ guards: ['jwt'] })).use(middleware.emailVerified())
     })
     .prefix('/api/v1')
