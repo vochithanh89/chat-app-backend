@@ -4,7 +4,7 @@ import { BaseMail } from '@adonisjs/mail'
 export default class VerifyEmailNotification extends BaseMail {
   constructor(
     private user: User,
-    private token: string
+    private otp: string
   ) {
     super()
   }
@@ -17,12 +17,11 @@ export default class VerifyEmailNotification extends BaseMail {
    * the email is sent or queued.
    */
   prepare() {
-    const verificationUrl = `http://localhost:3333/verify-email?token=${this.token}`
-
     this.message.to(this.user.email).html(`
       <h1>Welcome to Our Application!</h1>
-      <p>Please click the link below to verify your email address:</p>
-      <a href="${verificationUrl}">Verify Email</a>
+      <p>Your email verification code is:</p>
+      <h2>${this.otp}</h2>
+      <p>This code will expire in 10 minutes.</p>
     `)
   }
 }

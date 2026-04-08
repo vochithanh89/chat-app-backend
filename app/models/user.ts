@@ -20,6 +20,9 @@ export default class User extends compose(BaseModel, AuthFinder) {
   @column()
   declare email: string
 
+  @column()
+  declare phone: string | null
+
   @column({ serializeAs: null })
   declare password: string
 
@@ -40,6 +43,21 @@ export default class User extends compose(BaseModel, AuthFinder) {
 
   @column()
   declare avatarUrl: string | null
+
+  @column()
+  declare bio: string | null
+
+  @column()
+  declare isOnline: boolean
+
+  @column.dateTime()
+  declare lastSeenAt: DateTime | null
+
+  @column()
+  declare isAdmin: boolean
+
+  @column()
+  declare accountStatus: 'active' | 'locked'
 
   static refreshTokens = DbAccessTokensProvider.forModel(User, {
     prefix: 'rt_',

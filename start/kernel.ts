@@ -26,6 +26,7 @@ server.use([
   () => import('#middleware/container_bindings_middleware'),
   () => import('#middleware/force_json_response_middleware'),
   () => import('@adonisjs/cors/cors_middleware'),
+  () => import('@adonisjs/static/static_middleware'),
 ])
 
 /**
@@ -41,4 +42,6 @@ router.use([() => import('@adonisjs/core/bodyparser_middleware'), () => import('
 export const middleware = router.named({
   auth: () => import('#middleware/auth_middleware'),
   emailVerified: () => import('#middleware/email_verified_middleware'),
+  trackPresence: () => import('#middleware/track_presence_middleware'),
+  admin: () => import('#middleware/admin_middleware'),
 })

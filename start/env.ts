@@ -15,6 +15,7 @@ export default await Env.create(new URL('../', import.meta.url), {
   NODE_ENV: Env.schema.enum(['development', 'production', 'test'] as const),
   PORT: Env.schema.number(),
   APP_KEY: Env.schema.string(),
+  JWT_SECRET: Env.schema.string.optional(),
   HOST: Env.schema.string({ format: 'host' }),
   LOG_LEVEL: Env.schema.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']),
 
@@ -40,4 +41,25 @@ export default await Env.create(new URL('../', import.meta.url), {
   SMTP_PASSWORD: Env.schema.string(),
   // MAILGUN_API_KEY: Env.schema.string(),
   // MAILGUN_DOMAIN: Env.schema.string()
+
+  /*
+  |----------------------------------------------------------
+  | Firebase Cloud Messaging (push notifications)
+  |----------------------------------------------------------
+  | Leave empty to disable FCM — NotificationService will fall
+  | back to logging payloads instead of sending real pushes.
+  | FIREBASE_PRIVATE_KEY: paste the full PEM, escape newlines as \n.
+  */
+  FIREBASE_PROJECT_ID: Env.schema.string.optional(),
+  FIREBASE_CLIENT_EMAIL: Env.schema.string.optional(),
+  FIREBASE_PRIVATE_KEY: Env.schema.string.optional(),
+
+  /*
+  |----------------------------------------------------------
+  | AI Chatbot (Google Gemini)
+  |----------------------------------------------------------
+  | Leave empty to disable AI chat — endpoint will return 503.
+  */
+  GEMINI_API_KEY: Env.schema.string.optional(),
+  GEMINI_MODEL: Env.schema.string.optional(),
 })
