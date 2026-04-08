@@ -36,6 +36,7 @@ export default class AuthController {
       return ApiResponse.error(response, 403, 'Your account has been locked. Contact support.')
     }
     const tokens = await auth.use('jwt').generate(user)
+    const refreshTokenRow = await User.refreshTokens.create(user)
 
     user.isOnline = true
     user.lastSeenAt = DateTime.now()
@@ -43,7 +44,7 @@ export default class AuthController {
 
     return ApiResponse.ok(response, 'Login successful.', {
       token: (tokens as any).token,
-      refreshToken: (tokens as any).refreshToken,
+      refreshToken: refreshTokenRow.value!.release(),
       user: user.serialize(),
     })
   }
@@ -51,50 +52,41 @@ export default class AuthController {
   /**
    * @logout
    * @operationId logout
-   * @description Logs the authenticated user out and revokes their refresh token.
-   * @requestBody {"token": "string"}
+   * @description Logs the authenticated user out and revokes all of their refresh tokens.
    * @responseBody 200 - {"success": true, "message": "string", "data": {}}
    * @responseBody 401 - {"success": false, "message": "Unauthorized.", "errors": []}
    */
-  public async logout({ request, response, auth }: HttpContext) {
+  public async logout({ response, auth }: HttpContext) {
     const user = auth.use('jwt').getUserOrFail()
-    const refreshToken = request.input('token')
 
-    if (refreshToken) {
-      try {
-        const authed = await auth.use('jwt').authenticateWithRefreshToken(refreshToken)
-        const current = (authed as any).currentToken
-        if (current?.identifier) {
-          await User.refreshTokens.delete(authed, current.identifier)
-        }
-      } catch {
-        // Ignore invalid refresh tokens — logout should be idempotent.
-      }
+    const all = await User.refreshTokens.all(user)
+    for (const t of all) {
+      await User.refreshTokens.delete(user, t.identifier)
     }
 
     user.isOnline = false
     user.lastSeenAt = DateTime.now()
     await user.save()
 
-    return ApiResponse.ok(response, 'Logout successful.', null)
+    return ApiResponse.ok(response, 'Logout successful.', {})
   }
 
   /**
    * @refresh
    * @operationId refreshToken
-   * @description Issues a new JWT access token from a refresh token.
-   * @requestBody {"token": "string"}
+   * @description Issues a new JWT access + refresh token. Send the refresh token in the `Authorization: Bearer <refreshToken>` header.
    * @responseBody 200 - {"success": true, "message": "string", "data": {"token": "string", "refreshToken": "string", "user": "User"}}
    * @responseBody 401 - {"success": false, "message": "Invalid refresh token.", "errors": []}
    */
-  public async refresh({ request, response, auth }: HttpContext) {
-    const refreshToken = request.input('token')
-    const user = await auth.use('jwt').authenticateWithRefreshToken(refreshToken)
+  public async refresh({ response, auth }: HttpContext) {
+    // The lib reads the refresh token from the Authorization header and rotates it.
+    const user = await auth.use('jwt').authenticateWithRefreshToken()
     const tokens = await auth.use('jwt').generate(user)
+    const newRefreshToken = (user as any).currentToken as string | undefined
 
     return ApiResponse.ok(response, 'Token refreshed.', {
       token: (tokens as any).token,
-      refreshToken: (tokens as any).refreshToken,
+      refreshToken: newRefreshToken,
       user: user.serialize(),
     })
   }

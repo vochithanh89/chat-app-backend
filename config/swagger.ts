@@ -25,8 +25,15 @@ export default {
         parameters: {}, // OpenAPI conform parameters that are commonly used
         headers: {}, // OpenAPI conform headers that are commonly used
     },
-    securitySchemes: {}, // optional
-    authMiddlewares: ["auth", "auth:api"], // optional
+    securitySchemes: {
+        BearerAuth: {
+            type: "http",
+            scheme: "bearer",
+            bearerFormat: "JWT",
+            description: "Paste the JWT access token returned by /auth/login.",
+        },
+    },
+    authMiddlewares: ["auth", "auth:api"], // routes using these middleware names get BearerAuth applied
     defaultSecurityScheme: "BearerAuth", // optional
     persistAuthorization: true, // persist authorization between reloads on the swagger page
     showFullPath: true, // the path displayed after endpoint summary
