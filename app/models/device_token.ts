@@ -6,10 +6,11 @@ import User from '#models/user'
 export type DevicePlatform = 'android' | 'ios' | 'web'
 
 export default class DeviceToken extends BaseModel {
-  @column({ isPrimary: true })
+  // Auxiliary table — numeric id is internal only.
+  @column({ isPrimary: true, serializeAs: null })
   declare id: number
 
-  @column()
+  @column({ serializeAs: null })
   declare userId: number
 
   @column()

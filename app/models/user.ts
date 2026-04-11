@@ -1,7 +1,8 @@
+import { randomUUID } from 'node:crypto'
 import { DateTime } from 'luxon'
 import hash from '@adonisjs/core/services/hash'
 import { compose } from '@adonisjs/core/helpers'
-import { BaseModel, column } from '@adonisjs/lucid/orm'
+import { BaseModel, beforeCreate, column } from '@adonisjs/lucid/orm'
 import { withAuthFinder } from '@adonisjs/auth/mixins/lucid'
 import { DbAccessTokensProvider } from '@adonisjs/auth/access_tokens'
 
@@ -11,8 +12,13 @@ const AuthFinder = withAuthFinder(() => hash.use('scrypt'), {
 })
 
 export default class User extends compose(BaseModel, AuthFinder) {
-  @column({ isPrimary: true })
+  // Internal numeric primary key — used for FK joins, never exposed.
+  @column({ isPrimary: true, serializeAs: null })
   declare id: number
+
+  // Public identifier — always serialised as `id` in every response.
+  @column({ serializeAs: 'id' })
+  declare uuid: string
 
   @column()
   declare name: string | null
@@ -21,7 +27,7 @@ export default class User extends compose(BaseModel, AuthFinder) {
   declare email: string
 
   @column()
-  declare phone: string | null
+  declare phone: string
 
   @column({ serializeAs: null })
   declare password: string
@@ -65,4 +71,11 @@ export default class User extends compose(BaseModel, AuthFinder) {
     type: 'jwt_refresh_token',
     tokenSecretLength: 40,
   })
+
+  @beforeCreate()
+  static assignUuid(user: User) {
+    if (!user.uuid) {
+      user.uuid = randomUUID()
+    }
+  }
 }

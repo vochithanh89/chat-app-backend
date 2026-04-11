@@ -14,23 +14,37 @@ import {
 } from '#validators/conversation'
 import messageService from '#services/message_service'
 
+/** Resolve a conversation by its public UUID. */
+async function resolveByUuid(uuid: string) {
+  return Conversation.query().where('uuid', uuid).first()
+}
+
+/** Resolve a batch of user UUIDs to their numeric ids. */
+async function resolveUserIds(uuids: string[]): Promise<number[]> {
+  if (uuids.length === 0) return []
+  const rows = await User.query().whereIn('uuid', uuids).select('id')
+  return rows.map((u) => u.id)
+}
+
 export default class ConversationsController {
   /**
    * @createDirect
    * @operationId createDirectConversation
    * @description Creates (or returns the existing) 1-1 conversation with a user.
-   * @requestBody {"user_id": "number"}
+   * @requestBody {"user_id": "string"}
    * @responseBody 201 - {"success": true, "message": "string", "data": {"conversation": "object"}}
    */
   public async createDirect({ request, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const { user_id: otherId } = await request.validateUsing(createDirectConversationValidator)
+    const { user_id: otherUuid } = await request.validateUsing(createDirectConversationValidator)
+
+    const other = await User.findBy('uuid', otherUuid)
+    if (!other) return ApiResponse.error(response, 404, 'User not found.')
+    const otherId = other.id
 
     if (otherId === me.id) {
       return ApiResponse.error(response, 400, 'Cannot create a conversation with yourself.')
     }
-    const other = await User.find(otherId)
-    if (!other) return ApiResponse.error(response, 404, 'User not found.')
 
     // Find existing direct conversation
     const existing = await db
@@ -74,16 +88,17 @@ export default class ConversationsController {
    * @createGroup
    * @operationId createGroupConversation
    * @description Creates a new group conversation. Creator becomes the owner.
-   * @requestBody {"name": "string", "member_ids": "number[]"}
+   * @requestBody {"name": "string", "member_ids": "string[]"}
    * @responseBody 201 - {"success": true, "message": "string", "data": {"conversation": "object"}}
    */
   public async createGroup({ request, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const { name, member_ids: memberIds } = await request.validateUsing(
+    const { name, member_ids: memberUuids } = await request.validateUsing(
       createGroupConversationValidator
     )
 
-    const uniqueIds = Array.from(new Set(memberIds.filter((id) => id !== me.id)))
+    const resolvedIds = await resolveUserIds(memberUuids)
+    const uniqueIds = Array.from(new Set(resolvedIds.filter((id) => id !== me.id)))
     if (uniqueIds.length === 0) {
       return ApiResponse.error(response, 400, 'Group must have at least one other member.')
     }
@@ -140,11 +155,15 @@ export default class ConversationsController {
    */
   public async show({ params, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const member = await messageService.assertMember(Number(params.id), me.id)
+
+    const base = await resolveByUuid(params.id)
+    if (!base) return ApiResponse.error(response, 404, 'Conversation not found.')
+
+    const member = await messageService.assertMember(base.id, me.id)
     if (!member) return ApiResponse.error(response, 403, 'Not a member of this conversation.')
 
     const conv = await Conversation.query()
-      .where('id', params.id)
+      .where('id', base.id)
       .preload('members', (q) => q.preload('user'))
       .firstOrFail()
     return ApiResponse.ok(response, 'OK', { conversation: conv })
@@ -155,12 +174,13 @@ export default class ConversationsController {
    * @operationId addConversationMembers
    * @description Adds members to a group conversation. Owner or admin only.
    * @paramPath id - Conversation ID.
-   * @requestBody {"user_ids": "number[]"}
+   * @requestBody {"user_ids": "string[]"}
    * @responseBody 200 - {"success": true, "message": "string", "data": {"added": "number[]"}}
    */
   public async addMembers({ params, request, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const conv = await Conversation.findOrFail(params.id)
+    const conv = await resolveByUuid(params.id)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
     if (conv.type !== 'group') {
       return ApiResponse.error(response, 400, 'Only group conversations support adding members.')
     }
@@ -169,7 +189,8 @@ export default class ConversationsController {
       return ApiResponse.error(response, 403, 'Only owner or admin can add members.')
     }
 
-    const { user_ids: userIds } = await request.validateUsing(addMembersValidator)
+    const { user_ids: userUuids } = await request.validateUsing(addMembersValidator)
+    const userIds = await resolveUserIds(userUuids)
     const existing = await ConversationMember.query()
       .where('conversation_id', conv.id)
       .whereIn('user_id', userIds)
@@ -186,7 +207,12 @@ export default class ConversationsController {
         }))
       )
     }
-    return ApiResponse.ok(response, 'Members added.', { added: toAdd })
+    // Return the UUIDs of the actually-added users, not numeric ids.
+    const addedUuids =
+      toAdd.length === 0
+        ? []
+        : (await User.query().whereIn('id', toAdd).select('uuid')).map((u) => u.uuid)
+    return ApiResponse.ok(response, 'Members added.', { added: addedUuids })
   }
 
   /**
@@ -199,7 +225,8 @@ export default class ConversationsController {
    */
   public async removeMember({ params, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const conv = await Conversation.findOrFail(params.id)
+    const conv = await resolveByUuid(params.id)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
     if (conv.type !== 'group') {
       return ApiResponse.error(response, 400, 'Only groups support removing members.')
     }
@@ -207,7 +234,9 @@ export default class ConversationsController {
     if (!myMember || (myMember.role !== 'owner' && myMember.role !== 'admin')) {
       return ApiResponse.error(response, 403, 'Only owner or admin can remove members.')
     }
-    const targetId = Number(params.userId)
+    const target = await User.findBy('uuid', params.userId)
+    if (!target) return ApiResponse.error(response, 404, 'User not found.')
+    const targetId = target.id
     if (targetId === conv.ownerId) {
       return ApiResponse.error(response, 400, 'Cannot remove the owner.')
     }
@@ -227,7 +256,8 @@ export default class ConversationsController {
    */
   public async leave({ params, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const conv = await Conversation.findOrFail(params.id)
+    const conv = await resolveByUuid(params.id)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
     if (conv.type !== 'group') {
       return ApiResponse.error(response, 400, 'Cannot leave a direct conversation.')
     }
@@ -256,14 +286,17 @@ export default class ConversationsController {
    */
   public async updateMemberRole({ params, request, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const conv = await Conversation.findOrFail(params.id)
+    const conv = await resolveByUuid(params.id)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
     if (conv.ownerId !== me.id) {
       return ApiResponse.error(response, 403, 'Only the owner can change roles.')
     }
+    const target = await User.findBy('uuid', params.userId)
+    if (!target) return ApiResponse.error(response, 404, 'User not found.')
     const { role } = await request.validateUsing(updateMemberRoleValidator)
     const member = await ConversationMember.query()
       .where('conversation_id', conv.id)
-      .andWhere('user_id', params.userId)
+      .andWhere('user_id', target.id)
       .first()
     if (!member) return ApiResponse.error(response, 404, 'Member not found.')
     member.role = role
@@ -276,16 +309,20 @@ export default class ConversationsController {
    * @operationId transferOwnership
    * @description Transfers group ownership to another member. Owner only.
    * @paramPath id - Conversation ID.
-   * @requestBody {"user_id": "number"}
+   * @requestBody {"user_id": "string"}
    * @responseBody 200 - {"success": true, "message": "string", "data": {"conversation": "object"}}
    */
   public async transferOwnership({ params, request, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const conv = await Conversation.findOrFail(params.id)
+    const conv = await resolveByUuid(params.id)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
     if (conv.ownerId !== me.id) {
       return ApiResponse.error(response, 403, 'Only the owner can transfer ownership.')
     }
-    const { user_id: targetId } = await request.validateUsing(transferOwnershipValidator)
+    const { user_id: targetUuid } = await request.validateUsing(transferOwnershipValidator)
+    const targetUser = await User.findBy('uuid', targetUuid)
+    if (!targetUser) return ApiResponse.error(response, 404, 'User not found.')
+    const targetId = targetUser.id
     const target = await ConversationMember.query()
       .where('conversation_id', conv.id)
       .andWhere('user_id', targetId)
@@ -317,7 +354,8 @@ export default class ConversationsController {
    */
   public async disband({ params, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const conv = await Conversation.findOrFail(params.id)
+    const conv = await resolveByUuid(params.id)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
     if (conv.type !== 'group') {
       return ApiResponse.error(response, 400, 'Only groups can be disbanded.')
     }

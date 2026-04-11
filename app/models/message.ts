@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto'
 import { DateTime } from 'luxon'
-import { BaseModel, belongsTo, column, hasMany } from '@adonisjs/lucid/orm'
+import { BaseModel, beforeCreate, belongsTo, column, hasMany } from '@adonisjs/lucid/orm'
 import type { BelongsTo, HasMany } from '@adonisjs/lucid/types/relations'
 import User from '#models/user'
 import Conversation from '#models/conversation'
@@ -7,22 +8,25 @@ import MessageAttachment from '#models/message_attachment'
 import MessageReaction from '#models/message_reaction'
 
 export default class Message extends BaseModel {
-  @column({ isPrimary: true })
+  @column({ isPrimary: true, serializeAs: null })
   declare id: number
 
-  @column()
+  @column({ serializeAs: 'id' })
+  declare uuid: string
+
+  @column({ serializeAs: null })
   declare conversationId: number
 
-  @column()
+  @column({ serializeAs: null })
   declare senderId: number
 
   @column()
   declare content: string | null
 
-  @column()
+  @column({ serializeAs: null })
   declare replyToMessageId: number | null
 
-  @column()
+  @column({ serializeAs: null })
   declare forwardedFromId: number | null
 
   @column()
@@ -48,4 +52,11 @@ export default class Message extends BaseModel {
 
   @hasMany(() => MessageReaction)
   declare reactions: HasMany<typeof MessageReaction>
+
+  @beforeCreate()
+  static assignUuid(message: Message) {
+    if (!message.uuid) {
+      message.uuid = randomUUID()
+    }
+  }
 }

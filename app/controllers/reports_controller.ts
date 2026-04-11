@@ -10,20 +10,25 @@ export default class ReportsController {
    * @create
    * @operationId createReport
    * @description Reports a user or message for moderation review.
-   * @requestBody {"target_type": "user | message", "target_id": "number", "reason": "string"}
+   * @requestBody {"target_type": "user | message", "target_id": "string", "reason": "string"}
    * @responseBody 201 - {"success": true, "message": "string", "data": {"report": "object"}}
    * @responseBody 404 - {"success": false, "message": "Target not found.", "errors": []}
    */
   public async create({ request, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const { target_type: targetType, target_id: targetId, reason } =
+    const { target_type: targetType, target_id: targetUuid, reason } =
       await request.validateUsing(createReportValidator)
 
-    const targetExists =
-      targetType === 'user'
-        ? Boolean(await User.find(targetId))
-        : Boolean(await Message.find(targetId))
-    if (!targetExists) {
+    // Resolve public UUID → internal numeric id for the right table.
+    let targetId: number | null = null
+    if (targetType === 'user') {
+      const u = await User.findBy('uuid', targetUuid)
+      targetId = u?.id ?? null
+    } else {
+      const m = await Message.findBy('uuid', targetUuid)
+      targetId = m?.id ?? null
+    }
+    if (!targetId) {
       return ApiResponse.error(response, 404, 'Target not found.')
     }
 

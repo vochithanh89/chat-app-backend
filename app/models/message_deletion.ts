@@ -2,13 +2,13 @@ import { DateTime } from 'luxon'
 import { BaseModel, column } from '@adonisjs/lucid/orm'
 
 export default class MessageDeletion extends BaseModel {
-  @column({ isPrimary: true })
+  @column({ isPrimary: true, serializeAs: null })
   declare id: number
 
-  @column()
+  @column({ serializeAs: null })
   declare messageId: number
 
-  @column()
+  @column({ serializeAs: null })
   declare userId: number
 
   @column.dateTime({ autoCreate: true })

@@ -5,13 +5,15 @@ import User from '#models/user'
 import Message from '#models/message'
 
 export default class MessageReaction extends BaseModel {
-  @column({ isPrimary: true })
+  // Auxiliary pivot — hidden from responses; translated in
+  // MessageService.serialize when the parent message is returned.
+  @column({ isPrimary: true, serializeAs: null })
   declare id: number
 
-  @column()
+  @column({ serializeAs: null })
   declare messageId: number
 
-  @column()
+  @column({ serializeAs: null })
   declare userId: number
 
   @column()

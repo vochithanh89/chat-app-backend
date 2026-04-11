@@ -6,13 +6,15 @@ import Message from '#models/message'
 export type AttachmentType = 'image' | 'video' | 'document' | 'audio'
 
 export default class MessageAttachment extends BaseModel {
+  // Attachment ids stay numeric — auxiliary table. The client only uses
+  // them as opaque tokens between upload and send-message.
   @column({ isPrimary: true })
   declare id: number
 
-  @column()
+  @column({ serializeAs: null })
   declare messageId: number | null
 
-  @column()
+  @column({ serializeAs: null })
   declare uploadedBy: number | null
 
   @column()

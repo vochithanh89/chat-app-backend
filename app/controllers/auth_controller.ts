@@ -95,7 +95,7 @@ export default class AuthController {
    * @register
    * @operationId registerUser
    * @description Registers a new user and emails an OTP for verification.
-   * @requestBody {"name": "string", "email": "string", "password": "string", "password_confirmation": "string"}
+   * @requestBody {"name": "string", "email": "string", "phone": "string", "password": "string", "password_confirmation": "string"}
    * @responseBody 201 - {"success": true, "message": "string", "data": {"user": "User"}}
    * @responseBody 422 - {"success": false, "message": "Validation failed.", "errors": [{"field": "string", "message": "string"}]}
    */

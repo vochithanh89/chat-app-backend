@@ -7,13 +7,14 @@ import Conversation from '#models/conversation'
 export type MemberRole = 'owner' | 'admin' | 'member'
 
 export default class ConversationMember extends BaseModel {
-  @column({ isPrimary: true })
+  // Pivot row — its own numeric id is internal only.
+  @column({ isPrimary: true, serializeAs: null })
   declare id: number
 
-  @column()
+  @column({ serializeAs: null })
   declare conversationId: number
 
-  @column()
+  @column({ serializeAs: null })
   declare userId: number
 
   @column()

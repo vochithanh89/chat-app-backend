@@ -64,7 +64,7 @@ export default class AiController {
    * @chat
    * @operationId aiChat
    * @description Sends a user message to the AI conversation and returns the AI reply (also broadcast via WebSocket).
-   * @requestBody {"conversation_id": "number", "content": "string"}
+   * @requestBody {"conversation_id": "string", "content": "string"}
    * @responseBody 200 - {"success": true, "message": "string", "data": {"userMessage": "object", "aiMessage": "object"}}
    * @responseBody 403 - {"success": false, "message": "Forbidden.", "errors": []}
    * @responseBody 503 - {"success": false, "message": "AI is disabled.", "errors": []}
@@ -74,8 +74,12 @@ export default class AiController {
       return ApiResponse.error(response, 503, 'AI is disabled. Configure GEMINI_API_KEY.')
     }
     const me = auth.use('jwt').getUserOrFail()
-    const { conversation_id: conversationId, content } =
+    const { conversation_id: conversationUuid, content } =
       await request.validateUsing(aiChatValidator)
+
+    const conv = await Conversation.query().where('uuid', conversationUuid).first()
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
+    const conversationId = conv.id
 
     const member = await messageService.assertMember(conversationId, me.id)
     if (!member) return ApiResponse.error(response, 403, 'Not a member of this conversation.')
@@ -106,8 +110,8 @@ export default class AiController {
     })
 
     return ApiResponse.ok(response, 'OK', {
-      userMessage: messageService.serialize(userMessage),
-      aiMessage: messageService.serialize(aiMessage),
+      userMessage: await messageService.serialize(userMessage),
+      aiMessage: await messageService.serialize(aiMessage),
     })
   }
 }

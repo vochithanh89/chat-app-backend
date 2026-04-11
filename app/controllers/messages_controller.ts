@@ -1,5 +1,6 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import app from '@adonisjs/core/services/app'
+import Conversation from '#models/conversation'
 import Message from '#models/message'
 import MessageAttachment, { type AttachmentType } from '#models/message_attachment'
 import MessageReaction from '#models/message_reaction'
@@ -23,6 +24,16 @@ function detectAttachmentType(extname: string): AttachmentType {
   return 'document'
 }
 
+/** Resolve a conversation by its public UUID (from a route param). */
+async function resolveConversationByUuid(uuid: string) {
+  return Conversation.query().where('uuid', uuid).first()
+}
+
+/** Resolve a message by its public UUID (from a route param). */
+async function resolveMessageByUuid(uuid: string) {
+  return Message.findBy('uuid', uuid)
+}
+
 export default class MessagesController {
   /**
    * @list
@@ -36,7 +47,9 @@ export default class MessagesController {
    */
   public async list({ params, request, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const conversationId = Number(params.conversationId)
+    const conv = await resolveConversationByUuid(params.conversationId)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
+    const conversationId = conv.id
     const member = await messageService.assertMember(conversationId, me.id)
     if (!member) return ApiResponse.error(response, 403, 'Not a member.')
 
@@ -61,7 +74,7 @@ export default class MessagesController {
 
     const messages = await query
     return ApiResponse.ok(response, 'OK', {
-      messages: messages.map((m) => messageService.serialize(m)),
+      messages: await Promise.all(messages.map((m) => messageService.serialize(m))),
     })
   }
 
@@ -76,7 +89,9 @@ export default class MessagesController {
    */
   public async send({ params, request, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const conversationId = Number(params.conversationId)
+    const conv = await resolveConversationByUuid(params.conversationId)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
+    const conversationId = conv.id
     const member = await messageService.assertMember(conversationId, me.id)
     if (!member) return ApiResponse.error(response, 403, 'Not a member.')
 
@@ -90,7 +105,7 @@ export default class MessagesController {
     })
 
     return ApiResponse.created(response, 'Message sent.', {
-      message: messageService.serialize(message),
+      message: await messageService.serialize(message),
     })
   }
 
@@ -135,10 +150,12 @@ export default class MessagesController {
    */
   public async recall({ params, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
+    const target = await resolveMessageByUuid(params.id)
+    if (!target) return ApiResponse.error(response, 404, 'Message not found.')
     try {
-      const message = await messageService.recall(Number(params.id), me.id)
+      const message = await messageService.recall(target.id, me.id)
       return ApiResponse.ok(response, 'Message recalled.', {
-        message: messageService.serialize(message),
+        message: await messageService.serialize(message),
       })
     } catch (err: any) {
       return ApiResponse.error(response, err.status ?? 500, err.message ?? 'Failed.')
@@ -154,7 +171,7 @@ export default class MessagesController {
    */
   public async deleteForMe({ params, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const message = await Message.find(params.id)
+    const message = await resolveMessageByUuid(params.id)
     if (!message) return ApiResponse.error(response, 404, 'Message not found.')
     const member = await messageService.assertMember(message.conversationId, me.id)
     if (!member) return ApiResponse.error(response, 403, 'Not a member.')
@@ -168,16 +185,18 @@ export default class MessagesController {
    * @operationId forwardMessage
    * @description Forwards a message to one or more conversations.
    * @paramPath id - Message ID to forward.
-   * @requestBody {"conversation_ids": "number[]"}
+   * @requestBody {"conversation_ids": "string[]"}
    * @responseBody 201 - {"success": true, "message": "string", "data": {"messages": "array"}}
    */
   public async forward({ params, request, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const { conversation_ids: conversationIds } =
+    const original = await resolveMessageByUuid(params.id)
+    if (!original) return ApiResponse.error(response, 404, 'Message not found.')
+    const { conversation_ids: conversationUuids } =
       await request.validateUsing(forwardMessageValidator)
-    const created = await messageService.forward(Number(params.id), me.id, conversationIds)
+    const created = await messageService.forward(original.id, me.id, conversationUuids)
     return ApiResponse.created(response, 'Message forwarded.', {
-      messages: created.map((m) => messageService.serialize(m)),
+      messages: await Promise.all(created.map((m) => messageService.serialize(m))),
     })
   }
 
@@ -192,21 +211,23 @@ export default class MessagesController {
   public async react({ params, request, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
     const { emoji } = await request.validateUsing(reactMessageValidator)
-    const message = await Message.find(params.id)
+    const message = await resolveMessageByUuid(params.id)
     if (!message) return ApiResponse.error(response, 404, 'Message not found.')
     const member = await messageService.assertMember(message.conversationId, me.id)
     if (!member) return ApiResponse.error(response, 403, 'Not a member.')
 
-    const reaction = await MessageReaction.firstOrCreate(
+    await MessageReaction.firstOrCreate(
       { messageId: message.id, userId: me.id, emoji },
       { messageId: message.id, userId: me.id, emoji }
     )
     realtime.emitToConversation(message.conversationId, 'message:reaction:added', {
-      messageId: message.id,
-      userId: me.id,
+      messageId: message.uuid,
+      userId: me.uuid,
       emoji,
     })
-    return ApiResponse.created(response, 'Reaction added.', { reaction })
+    return ApiResponse.created(response, 'Reaction added.', {
+      reaction: { messageId: message.uuid, userId: me.uuid, emoji },
+    })
   }
 
   /**
@@ -219,7 +240,7 @@ export default class MessagesController {
    */
   public async unreact({ params, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const message = await Message.find(params.id)
+    const message = await resolveMessageByUuid(params.id)
     if (!message) return ApiResponse.error(response, 404, 'Message not found.')
 
     await MessageReaction.query()
@@ -229,8 +250,8 @@ export default class MessagesController {
       .delete()
 
     realtime.emitToConversation(message.conversationId, 'message:reaction:removed', {
-      messageId: message.id,
-      userId: me.id,
+      messageId: message.uuid,
+      userId: me.uuid,
       emoji: params.emoji,
     })
     return ApiResponse.ok(response, 'Reaction removed.', null)

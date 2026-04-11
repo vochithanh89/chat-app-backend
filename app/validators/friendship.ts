@@ -2,7 +2,8 @@ import vine from '@vinejs/vine'
 
 export const sendFriendRequestValidator = vine.compile(
   vine.object({
-    addressee_id: vine.number().positive(),
+    // Public identifier — UUID, never the numeric primary key.
+    addressee_id: vine.string().uuid(),
   })
 )
 

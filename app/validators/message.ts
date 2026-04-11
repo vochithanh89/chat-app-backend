@@ -10,7 +10,8 @@ export const sendMessageValidator = vine.compile(
 
 export const forwardMessageValidator = vine.compile(
   vine.object({
-    conversation_ids: vine.array(vine.number().positive()).minLength(1).maxLength(20),
+    // Public conversation identifiers are UUIDs.
+    conversation_ids: vine.array(vine.string().uuid()).minLength(1).maxLength(20),
   })
 )
 

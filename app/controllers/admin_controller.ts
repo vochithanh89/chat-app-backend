@@ -113,7 +113,7 @@ export default class AdminController {
    * @responseBody 200 - {"success": true, "message": "string", "data": {"user": "object"}}
    */
   public async updateUserStatus({ params, request, response }: HttpContext) {
-    const user = await User.find(params.id)
+    const user = await User.findBy('uuid', params.id)
     if (!user) return ApiResponse.error(response, 404, 'User not found.')
     const { status } = await request.validateUsing(updateUserStatusValidator)
     user.accountStatus = status
@@ -154,7 +154,7 @@ export default class AdminController {
    */
   public async updateReportStatus({ params, request, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const report = await Report.find(params.id)
+    const report = await Report.findBy('uuid', params.id)
     if (!report) return ApiResponse.error(response, 404, 'Report not found.')
     const { status } = await request.validateUsing(updateReportStatusValidator)
     report.status = status

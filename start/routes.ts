@@ -12,6 +12,7 @@ import swagger from '#config/swagger'
 const AuthController = () => import('#controllers/auth_controller')
 const UsersController = () => import('#controllers/users_controller')
 const FriendsController = () => import('#controllers/friends_controller')
+const BlocksController = () => import('#controllers/blocks_controller')
 const ConversationsController = () => import('#controllers/conversations_controller')
 const MessagesController = () => import('#controllers/messages_controller')
 const AiController = () => import('#controllers/ai_controller')
@@ -91,6 +92,13 @@ router
         router
           .delete('/friends/:userId', [FriendsController, 'unfriend'])
           .as('friends.unfriend')
+
+        // Blocking
+        router.get('/blocks', [BlocksController, 'list']).as('blocks.list')
+        router.post('/blocks', [BlocksController, 'block']).as('blocks.block')
+        router
+          .delete('/blocks/:userId', [BlocksController, 'unblock'])
+          .as('blocks.unblock')
 
         // Conversations
         router

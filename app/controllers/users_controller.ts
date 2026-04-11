@@ -33,13 +33,13 @@ export default class UsersController {
    * @responseBody 404 - {"success": false, "message": "User not found.", "errors": []}
    */
   public async show({ params, response }: HttpContext) {
-    const user = await User.find(params.id)
+    const user = await User.findBy('uuid', params.id)
     if (!user) {
       return ApiResponse.error(response, 404, 'User not found.')
     }
     return ApiResponse.ok(response, 'OK', {
       user: {
-        id: user.id,
+        id: user.uuid,
         name: user.name,
         avatarUrl: user.avatarUrl,
         bio: user.bio,
@@ -143,25 +143,47 @@ export default class UsersController {
       { data: request.qs() }
     )
 
-    const query = User.query().whereNot('id', me.id)
+    const query = User.query()
+      .whereNot('id', me.id)
+      // Exclude users I've blocked
+      .whereNotExists((sub) => {
+        sub
+          .from('user_blocks')
+          .whereRaw('user_blocks.blocked_id = users.id')
+          .andWhere('user_blocks.blocker_id', me.id)
+      })
+      // Exclude users who have blocked me
+      .whereNotExists((sub) => {
+        sub
+          .from('user_blocks')
+          .whereRaw('user_blocks.blocker_id = users.id')
+          .andWhere('user_blocks.blocked_id', me.id)
+      })
 
+    // Email and phone require an EXACT match (privacy — partial matches
+    // would let someone enumerate users by prefix). Name still uses a
+    // case-insensitive LIKE so users are discoverable by partial name.
     if (type === 'email') {
-      query.where('email', 'like', `%${q}%`)
+      query.where('email', q)
     } else if (type === 'phone') {
-      query.where('phone', 'like', `%${q}%`)
+      query.where('phone', q)
     } else if (type === 'name') {
       query.where('name', 'like', `%${q}%`)
     } else {
       query.where((sub) => {
         sub
           .where('name', 'like', `%${q}%`)
-          .orWhere('email', 'like', `%${q}%`)
-          .orWhere('phone', 'like', `%${q}%`)
+          .orWhere('email', q)
+          .orWhere('phone', q)
       })
     }
 
+    // Email/phone are intentionally omitted from the result — they are
+    // still searchable (see WHERE clauses above) but must not leak back
+    // in the response payload. `uuid` is selected so the model serialises
+    // it as `id` (see User model `serializeAs: 'id'`).
     const result = await query
-      .select('id', 'name', 'email', 'phone', 'avatar_url', 'bio', 'is_online', 'last_seen_at')
+      .select('id', 'uuid', 'name', 'avatar_url', 'bio', 'is_online', 'last_seen_at')
       .orderBy('id', 'desc')
       .paginate(page, limit)
 
