@@ -3,7 +3,10 @@ import { DateTime } from 'luxon'
 import db from '@adonisjs/lucid/services/db'
 import Conversation from '#models/conversation'
 import ConversationMember from '#models/conversation_member'
+import Friendship from '#models/friendship'
+import Message from '#models/message'
 import User from '#models/user'
+import UserBlock from '#models/user_block'
 import { ApiResponse } from '#utils/api_response'
 import {
   createDirectConversationValidator,
@@ -11,8 +14,10 @@ import {
   addMembersValidator,
   updateMemberRoleValidator,
   transferOwnershipValidator,
+  markReadValidator,
 } from '#validators/conversation'
 import messageService from '#services/message_service'
+import realtimeService from '#services/realtime_service'
 
 /** Resolve a conversation by its public UUID. */
 async function resolveByUuid(uuid: string) {
@@ -24,6 +29,158 @@ async function resolveUserIds(uuids: string[]): Promise<number[]> {
   if (uuids.length === 0) return []
   const rows = await User.query().whereIn('uuid', uuids).select('id')
   return rows.map((u) => u.id)
+}
+
+/**
+ * For each direct conversation, figure out whether the current user is
+ * blocking (or is blocked by) the OTHER participant. Returns two maps
+ * keyed by conversation id. Group conversations are never in the maps.
+ */
+async function computeDirectBlockStatus(
+  meId: number,
+  conversations: Conversation[]
+): Promise<{
+  blockedByMe: Map<number, boolean>
+  blockedByOther: Map<number, boolean>
+}> {
+  const blockedByMe = new Map<number, boolean>()
+  const blockedByOther = new Map<number, boolean>()
+
+  // Collect (convId, otherUserId) for directs only.
+  const pairs: Array<{ convId: number; otherId: number }> = []
+  for (const c of conversations) {
+    if (c.type !== 'direct') continue
+    const other = c.members.find((m) => m.userId !== meId)
+    if (other) pairs.push({ convId: c.id, otherId: other.userId })
+  }
+  if (pairs.length === 0) return { blockedByMe, blockedByOther }
+
+  const otherIds = pairs.map((p) => p.otherId)
+
+  // One round-trip covers both directions of the relationship.
+  const blocks = await UserBlock.query().where((q) => {
+    q.where((s) => s.where('blocker_id', meId).whereIn('blocked_id', otherIds)).orWhere(
+      (s) => s.whereIn('blocker_id', otherIds).where('blocked_id', meId)
+    )
+  })
+
+  const mineSet = new Set<number>()
+  const theirSet = new Set<number>()
+  for (const b of blocks) {
+    if (b.blockerId === meId) mineSet.add(b.blockedId)
+    else theirSet.add(b.blockerId)
+  }
+
+  for (const p of pairs) {
+    if (mineSet.has(p.otherId)) blockedByMe.set(p.convId, true)
+    if (theirSet.has(p.otherId)) blockedByOther.set(p.convId, true)
+  }
+
+  return { blockedByMe, blockedByOther }
+}
+
+/**
+ * For each direct conversation, figure out the friendship state
+ * between the current user and the OTHER participant. Returns per-conv
+ * flags + the friendship UUID when one exists (needed for Accept /
+ * Cancel request actions in the UI).
+ */
+type DirectFriendshipStatus = {
+  isFriend: boolean
+  friendRequestSent: boolean
+  friendRequestReceived: boolean
+  friendshipId: string | null
+}
+
+async function computeDirectFriendshipStatus(
+  meId: number,
+  conversations: Conversation[]
+): Promise<Map<number, DirectFriendshipStatus>> {
+  const out = new Map<number, DirectFriendshipStatus>()
+
+  const pairs: Array<{ convId: number; otherId: number }> = []
+  for (const c of conversations) {
+    if (c.type !== 'direct') continue
+    const other = c.members.find((m) => m.userId !== meId)
+    if (other) pairs.push({ convId: c.id, otherId: other.userId })
+  }
+  if (pairs.length === 0) return out
+
+  const otherIds = pairs.map((p) => p.otherId)
+  const rows = await Friendship.query().where((q) => {
+    q.where((s) => s.where('requester_id', meId).whereIn('addressee_id', otherIds)).orWhere(
+      (s) => s.whereIn('requester_id', otherIds).where('addressee_id', meId)
+    )
+  })
+
+  // Index by the "other user id" for O(1) lookup.
+  const byOther = new Map<number, Friendship>()
+  for (const r of rows) {
+    const otherUserId = r.requesterId === meId ? r.addresseeId : r.requesterId
+    byOther.set(otherUserId, r)
+  }
+
+  for (const p of pairs) {
+    const row = byOther.get(p.otherId)
+    if (!row) {
+      out.set(p.convId, {
+        isFriend: false,
+        friendRequestSent: false,
+        friendRequestReceived: false,
+        friendshipId: null,
+      })
+      continue
+    }
+    const isFriend = row.status === 'accepted'
+    const friendRequestSent =
+      row.status === 'pending' && row.requesterId === meId
+    const friendRequestReceived =
+      row.status === 'pending' && row.addresseeId === meId
+    out.set(p.convId, {
+      isFriend,
+      friendRequestSent,
+      friendRequestReceived,
+      friendshipId: row.uuid,
+    })
+  }
+
+  return out
+}
+
+/**
+ * Batch-compute the unread message count per conversation for a given
+ * user. A message is "unread" when:
+ *   - it belongs to one of the target conversations,
+ *   - it is NOT authored by the user themselves, and
+ *   - its `created_at` is newer than the user's `last_read_at` on that
+ *     conversation (or the user has never read it).
+ *
+ * Single JOIN query, grouped by conversation.
+ */
+async function computeUnreadCounts(
+  userId: number,
+  conversationIds: number[]
+): Promise<Map<number, number>> {
+  const out = new Map<number, number>()
+  if (conversationIds.length === 0) return out
+
+  const rows = await db
+    .from('messages as m')
+    .innerJoin('conversation_members as cm', 'cm.conversation_id', 'm.conversation_id')
+    .where('cm.user_id', userId)
+    .whereIn('m.conversation_id', conversationIds)
+    .whereRaw('m.sender_id != ?', [userId])
+    .andWhere((q) => {
+      q.whereNull('cm.last_read_at').orWhereRaw('m.created_at > cm.last_read_at')
+    })
+    .groupBy('m.conversation_id')
+    .select('m.conversation_id as conversationId')
+    .count('* as total')
+
+  for (const row of rows) {
+    out.set(Number(row.conversationId), Number(row.total))
+  }
+  return out
 }
 
 export default class ConversationsController {
@@ -122,6 +279,22 @@ export default class ConversationsController {
     })
 
     await conv.load('members', (q) => q.preload('user'))
+
+    // Notify every invited member so their sidebar list refreshes
+    // in real time. Also make their sockets join the new conv room
+    // so subsequent message events reach them without a reconnect.
+    for (const invitedId of uniqueIds) {
+      await realtimeService.joinUserToConversation(invitedId, conv)
+      realtimeService.emitToUser(invitedId, 'conversation:joined', {
+        conversationId: conv.uuid,
+      })
+    }
+    // The creator's other tabs also need to know.
+    await realtimeService.joinUserToConversation(me.id, conv)
+    realtimeService.emitToUser(me.id, 'conversation:joined', {
+      conversationId: conv.uuid,
+    })
+
     return ApiResponse.created(response, 'Group created.', { conversation: conv })
   }
 
@@ -142,7 +315,27 @@ export default class ConversationsController {
       .preload('members', (q) => q.preload('user'))
       .orderBy('last_message_at', 'desc')
 
-    return ApiResponse.ok(response, 'OK', { conversations: convs })
+    const unreadMap = await computeUnreadCounts(me.id, ids)
+    const { blockedByMe, blockedByOther } = await computeDirectBlockStatus(
+      me.id,
+      convs
+    )
+    const friendshipMap = await computeDirectFriendshipStatus(me.id, convs)
+    const out = convs.map((c) => {
+      const friendship = friendshipMap.get(c.id)
+      return {
+        ...c.serialize(),
+        unreadCount: unreadMap.get(c.id) ?? 0,
+        blockedByMe: blockedByMe.get(c.id) ?? false,
+        blockedByOther: blockedByOther.get(c.id) ?? false,
+        isFriend: friendship?.isFriend ?? false,
+        friendRequestSent: friendship?.friendRequestSent ?? false,
+        friendRequestReceived: friendship?.friendRequestReceived ?? false,
+        friendshipId: friendship?.friendshipId ?? null,
+      }
+    })
+
+    return ApiResponse.ok(response, 'OK', { conversations: out })
   }
 
   /**
@@ -166,7 +359,26 @@ export default class ConversationsController {
       .where('id', base.id)
       .preload('members', (q) => q.preload('user'))
       .firstOrFail()
-    return ApiResponse.ok(response, 'OK', { conversation: conv })
+
+    const unreadMap = await computeUnreadCounts(me.id, [conv.id])
+    const { blockedByMe, blockedByOther } = await computeDirectBlockStatus(
+      me.id,
+      [conv]
+    )
+    const friendshipMap = await computeDirectFriendshipStatus(me.id, [conv])
+    const friendship = friendshipMap.get(conv.id)
+    const out = {
+      ...conv.serialize(),
+      unreadCount: unreadMap.get(conv.id) ?? 0,
+      blockedByMe: blockedByMe.get(conv.id) ?? false,
+      blockedByOther: blockedByOther.get(conv.id) ?? false,
+      isFriend: friendship?.isFriend ?? false,
+      friendRequestSent: friendship?.friendRequestSent ?? false,
+      friendRequestReceived: friendship?.friendRequestReceived ?? false,
+      friendshipId: friendship?.friendshipId ?? null,
+    }
+
+    return ApiResponse.ok(response, 'OK', { conversation: out })
   }
 
   /**
@@ -207,11 +419,28 @@ export default class ConversationsController {
         }))
       )
     }
+
     // Return the UUIDs of the actually-added users, not numeric ids.
-    const addedUuids =
+    const addedUsers =
       toAdd.length === 0
         ? []
-        : (await User.query().whereIn('id', toAdd).select('uuid')).map((u) => u.uuid)
+        : await User.query().whereIn('id', toAdd).select('id', 'uuid')
+    const addedUuids = addedUsers.map((u) => u.uuid)
+
+    // Realtime: make every newly-added user join the conv room and
+    // notify their sidebar to insert the conversation.
+    for (const u of addedUsers) {
+      await realtimeService.joinUserToConversation(u.id, conv)
+      realtimeService.emitToUser(u.id, 'conversation:joined', {
+        conversationId: conv.uuid,
+      })
+    }
+    // Existing members get a lighter signal so their member list
+    // refreshes.
+    realtimeService.emitToConversation(conv.id, 'conversation:members-changed', {
+      conversationId: conv.uuid,
+    })
+
     return ApiResponse.ok(response, 'Members added.', { added: addedUuids })
   }
 
@@ -244,6 +473,18 @@ export default class ConversationsController {
       .where('conversation_id', conv.id)
       .andWhere('user_id', targetId)
       .delete()
+
+    // Realtime: pop the conversation out of the removed user's
+    // sidebar and take their sockets out of the conv room. The
+    // remaining members get a member-list refresh signal.
+    realtimeService.emitToUser(targetId, 'conversation:removed', {
+      conversationId: conv.uuid,
+    })
+    await realtimeService.leaveUserFromConversation(targetId, conv.id)
+    realtimeService.emitToConversation(conv.id, 'conversation:members-changed', {
+      conversationId: conv.uuid,
+    })
+
     return ApiResponse.ok(response, 'Member removed.', null)
   }
 
@@ -272,6 +513,18 @@ export default class ConversationsController {
       .where('conversation_id', conv.id)
       .andWhere('user_id', me.id)
       .delete()
+
+    // Realtime: drop the conv from every tab of the leaving user and
+    // take their sockets out of the room. Remaining members get a
+    // members-changed signal for their open group info dialogs.
+    realtimeService.emitToUser(me.id, 'conversation:removed', {
+      conversationId: conv.uuid,
+    })
+    await realtimeService.leaveUserFromConversation(me.id, conv.id)
+    realtimeService.emitToConversation(conv.id, 'conversation:members-changed', {
+      conversationId: conv.uuid,
+    })
+
     return ApiResponse.ok(response, 'Left conversation.', null)
   }
 
@@ -362,7 +615,65 @@ export default class ConversationsController {
     if (conv.ownerId !== me.id) {
       return ApiResponse.error(response, 403, 'Only the owner can disband the group.')
     }
+
+    // Notify all members BEFORE deleting — the cascade would otherwise
+    // remove the membership rows we use to figure out who to tell.
+    const members = await ConversationMember.query().where('conversation_id', conv.id)
+    const convUuid = conv.uuid
+    const convInternalId = conv.id
+
     await conv.delete()
+
+    for (const m of members) {
+      realtimeService.emitToUser(m.userId, 'conversation:removed', {
+        conversationId: convUuid,
+      })
+      await realtimeService.leaveUserFromConversation(m.userId, convInternalId)
+    }
+
     return ApiResponse.ok(response, 'Group disbanded.', null)
+  }
+
+  /**
+   * @markRead
+   * @operationId markConversationRead
+   * @description Marks the current user as having read the conversation up to (at least) now. Broadcasts a `conversation:read` socket event so other members see the read receipt in real time.
+   * @paramPath id - Conversation ID.
+   * @requestBody {"last_message_id": "string"}
+   * @responseBody 200 - {"success": true, "message": "string", "data": {"lastReadAt": "string"}}
+   * @responseBody 403 - {"success": false, "message": "Forbidden.", "errors": []}
+   */
+  public async markRead({ params, request, response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const conv = await resolveByUuid(params.id)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
+
+    const myMember = await messageService.assertMember(conv.id, me.id)
+    if (!myMember) {
+      return ApiResponse.error(response, 403, 'Not a member of this conversation.')
+    }
+
+    const { last_message_id: lastMessageUuid } =
+      await request.validateUsing(markReadValidator)
+
+    const now = DateTime.now()
+    myMember.lastReadAt = now
+    await myMember.save()
+
+    // Resolve the optional message UUID for the broadcast payload.
+    let lastMessagePublicId: string | null = null
+    if (lastMessageUuid) {
+      const m = await Message.findBy('uuid', lastMessageUuid)
+      if (m) lastMessagePublicId = m.uuid
+    }
+
+    realtimeService.emitToConversation(conv.id, 'conversation:read', {
+      conversationId: conv.uuid,
+      userId: me.uuid,
+      lastReadAt: now,
+      lastMessageId: lastMessagePublicId,
+    })
+
+    return ApiResponse.ok(response, 'OK', { lastReadAt: now })
   }
 }

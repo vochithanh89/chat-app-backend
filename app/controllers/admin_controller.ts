@@ -31,7 +31,7 @@ export default class AdminController {
    * @responseBody 200 - {"success": true, "message": "string", "data": {"users": "number", "newUsersToday": "number", "conversations": "number", "groups": "number", "messagesToday": "number"}}
    */
   public async overview({ response }: HttpContext) {
-    const startOfDay = DateTime.now().startOf('day').toSQL()
+    const startOfDay = DateTime.now().startOf('day').toSQL({ includeOffset: false })
     const [users, newUsersToday, conversations, groups, messagesToday] = await Promise.all([
       User.query().count('* as total'),
       User.query().where('created_at', '>=', startOfDay!).count('* as total'),
@@ -67,7 +67,7 @@ export default class AdminController {
       .from('messages')
       .select(db.raw(`DATE_FORMAT(created_at, '${bucket}') as bucket`))
       .count('* as total')
-      .where('created_at', '>=', start.toSQL()!)
+      .where('created_at', '>=', start.toSQL({ includeOffset: false })!)
       .groupByRaw('bucket')
       .orderByRaw('bucket asc')
 

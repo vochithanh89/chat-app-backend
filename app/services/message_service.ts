@@ -100,7 +100,7 @@ class MessageService {
 
       await Conversation.query({ client: trx })
         .where('id', conversationId)
-        .update({ lastMessageAt: DateTime.now().toSQL() })
+        .update({ lastMessageAt: DateTime.now().toSQL({ includeOffset: false }) })
 
       return m
     })
@@ -140,7 +140,9 @@ class MessageService {
     message.isRecalled = true
     message.content = null
     await message.save()
-    realtime.emitToConversation(message.conversationId, 'message:recalled', { id: message.id })
+    realtime.emitToConversation(message.conversationId, 'message:recalled', {
+      id: message.uuid,
+    })
     return message
   }
 
@@ -179,7 +181,7 @@ class MessageService {
       }
       await Conversation.query()
         .where('id', convId)
-        .update({ lastMessageAt: DateTime.now().toSQL() })
+        .update({ lastMessageAt: DateTime.now().toSQL({ includeOffset: false }) })
 
       await m.load((l) => l.load('sender').load('attachments'))
       realtime.emitToConversation(convId, 'message:new', await this.serialize(m))

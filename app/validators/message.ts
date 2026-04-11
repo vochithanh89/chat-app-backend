@@ -52,7 +52,9 @@ export const uploadAttachmentValidator = vine.compile(
 
 export const listMessagesValidator = vine.compile(
   vine.object({
-    before: vine.number().positive().optional(),
+    // Cursor: UUID of the earliest message already seen on the client.
+    // Returns messages strictly older than the anchor.
+    before: vine.string().uuid().optional(),
     limit: vine.number().positive().max(100).optional(),
   })
 )

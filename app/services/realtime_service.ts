@@ -4,11 +4,19 @@ import logger from '@adonisjs/core/services/logger'
 import jwt from 'jsonwebtoken'
 import { DateTime } from 'luxon'
 import env from '#start/env'
+import Conversation from '#models/conversation'
 import ConversationMember from '#models/conversation_member'
 import User from '#models/user'
 
 interface AuthedSocket extends Socket {
-  data: { userId: number }
+  data: {
+    userId: number
+    userUuid?: string
+    /** Map public conversation UUID → internal numeric id. Populated
+     *  on connect so transient events like typing indicators can
+     *  resolve the target room without hitting the DB. */
+    convUuidToId?: Record<string, number>
+  }
 }
 
 /**
@@ -91,11 +99,53 @@ class RealtimeService {
         socket.leave(`conv:${conversationId}`)
       })
 
+      // Typing indicators — broadcast to other members of the
+      // conversation room, excluding the sender. Payload:
+      //   { conversationId: "uuid" }
+      // The server resolves the UUID via the pre-cached map so we
+      // don't touch the DB on every keystroke.
+      socket.on('typing:start', (data: { conversationId?: string }) => {
+        const convUuid = data?.conversationId
+        if (!convUuid) return
+        const authed = socket as AuthedSocket
+        const internalId = authed.data.convUuidToId?.[convUuid]
+        if (!internalId) return
+        socket.to(`conv:${internalId}`).emit('typing:start', {
+          conversationId: convUuid,
+          userId: authed.data.userUuid,
+        })
+      })
+      socket.on('typing:stop', (data: { conversationId?: string }) => {
+        const convUuid = data?.conversationId
+        if (!convUuid) return
+        const authed = socket as AuthedSocket
+        const internalId = authed.data.convUuidToId?.[convUuid]
+        if (!internalId) return
+        socket.to(`conv:${internalId}`).emit('typing:stop', {
+          conversationId: convUuid,
+          userId: authed.data.userUuid,
+        })
+      })
+
       // Personal + conversation rooms.
       socket.join(`user:${userId}`)
       try {
-        const memberships = await ConversationMember.query().where('user_id', userId)
-        for (const m of memberships) socket.join(`conv:${m.conversationId}`)
+        // Load the user's UUID + all memberships (with conversation
+        // UUIDs) once per connection. These feed the transient-event
+        // cache described above.
+        const user = await User.find(userId)
+        ;(socket as AuthedSocket).data.userUuid = user?.uuid
+
+        const memberships = await ConversationMember.query()
+          .where('user_id', userId)
+          .preload('conversation', (q) => q.select('id', 'uuid'))
+
+        const convMap: Record<string, number> = {}
+        for (const m of memberships) {
+          socket.join(`conv:${m.conversationId}`)
+          if (m.conversation?.uuid) convMap[m.conversation.uuid] = m.conversationId
+        }
+        ;(socket as AuthedSocket).data.convUuidToId = convMap
       } catch (err) {
         logger.warn({ err, userId }, 'failed to load memberships on connect')
       }
@@ -112,6 +162,64 @@ class RealtimeService {
   emitToUser(userId: number, event: string, payload: unknown): void {
     if (!this.io) return
     this.io.to(`user:${userId}`).emit(event, payload)
+  }
+
+  /**
+   * Make every currently-connected socket for `userId` join the
+   * conversation's socket.io room and remember its public UUID in the
+   * per-socket cache used by transient events (typing, etc.).
+   *
+   * Call this right after a user gains membership to a conversation so
+   * they start receiving `message:new` / `conversation:read` / typing
+   * events without having to reconnect.
+   */
+  async joinUserToConversation(userId: number, conversation: Conversation): Promise<void> {
+    if (!this.io) return
+    try {
+      const sockets = await this.io.in(`user:${userId}`).fetchSockets()
+      for (const s of sockets) {
+        s.join(`conv:${conversation.id}`)
+        const data = s.data as AuthedSocket['data']
+        if (data.convUuidToId) {
+          data.convUuidToId[conversation.uuid] = conversation.id
+        }
+      }
+    } catch (err) {
+      logger.warn(
+        { err, userId, conversationId: conversation.id },
+        'joinUserToConversation failed'
+      )
+    }
+  }
+
+  /**
+   * Reverse of joinUserToConversation — remove every socket for
+   * `userId` from the conversation room and clear the cache entry.
+   */
+  async leaveUserFromConversation(
+    userId: number,
+    conversationId: number
+  ): Promise<void> {
+    if (!this.io) return
+    try {
+      const sockets = await this.io.in(`user:${userId}`).fetchSockets()
+      for (const s of sockets) {
+        s.leave(`conv:${conversationId}`)
+        const data = s.data as AuthedSocket['data']
+        if (data.convUuidToId) {
+          for (const key of Object.keys(data.convUuidToId)) {
+            if (data.convUuidToId[key] === conversationId) {
+              delete data.convUuidToId[key]
+            }
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn(
+        { err, userId, conversationId },
+        'leaveUserFromConversation failed'
+      )
+    }
   }
 
   /**

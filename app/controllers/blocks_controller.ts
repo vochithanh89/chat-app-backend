@@ -89,7 +89,10 @@ export default class BlocksController {
 
     await block.delete()
 
+    // Tell the unblocker (their other tabs too) and the formerly-blocked
+    // user so both sides can refresh their conversation state.
     realtimeService.emitToUser(me.id, 'friend:unblocked', { userId: target.uuid })
+    realtimeService.emitToUser(otherId, 'friend:unblocked-by', { userId: me.uuid })
 
     return ApiResponse.ok(response, 'User unblocked.', null)
   }

@@ -134,6 +134,9 @@ router
         router
           .delete('/conversations/:id', [ConversationsController, 'disband'])
           .as('conversations.disband')
+        router
+          .post('/conversations/:id/read', [ConversationsController, 'markRead'])
+          .as('conversations.markRead')
 
         // Messages
         router

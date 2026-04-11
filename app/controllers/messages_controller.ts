@@ -62,10 +62,17 @@ export default class MessagesController {
       await MessageDeletion.query().where('user_id', me.id).select('message_id')
     ).map((d) => d.messageId)
 
+    // Translate the UUID cursor (public) to its internal numeric id.
+    let beforeId: number | null = null
+    if (before) {
+      const anchor = await Message.findBy('uuid', before)
+      if (anchor) beforeId = anchor.id
+    }
+
     const query = Message.query()
       .where('conversation_id', conversationId)
       .if(deletedIds.length > 0, (q) => q.whereNotIn('id', deletedIds))
-      .if(before, (q) => q.where('id', '<', before!))
+      .if(beforeId, (q) => q.where('id', '<', beforeId!))
       .preload('sender')
       .preload('attachments')
       .preload('reactions')
