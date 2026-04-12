@@ -137,6 +137,9 @@ router
         router
           .post('/conversations/:id/read', [ConversationsController, 'markRead'])
           .as('conversations.markRead')
+        router
+          .put('/conversations/:id/avatar', [ConversationsController, 'updateAvatar'])
+          .as('conversations.updateAvatar')
 
         // Messages
         router

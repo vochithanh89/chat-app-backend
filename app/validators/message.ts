@@ -3,8 +3,8 @@ import vine from '@vinejs/vine'
 export const sendMessageValidator = vine.compile(
   vine.object({
     content: vine.string().trim().maxLength(10000).optional(),
-    reply_to_message_id: vine.number().positive().optional(),
-    attachment_ids: vine.array(vine.number().positive()).maxLength(20).optional(),
+    reply_to_message_id: vine.string().uuid().optional(),
+    attachment_ids: vine.array(vine.string().uuid()).maxLength(20).optional(),
   })
 )
 

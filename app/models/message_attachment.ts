@@ -1,15 +1,19 @@
+import { randomUUID } from 'node:crypto'
 import { DateTime } from 'luxon'
-import { BaseModel, belongsTo, column } from '@adonisjs/lucid/orm'
+import { BaseModel, beforeCreate, belongsTo, column } from '@adonisjs/lucid/orm'
 import type { BelongsTo } from '@adonisjs/lucid/types/relations'
 import Message from '#models/message'
 
 export type AttachmentType = 'image' | 'video' | 'document' | 'audio'
 
 export default class MessageAttachment extends BaseModel {
-  // Attachment ids stay numeric — auxiliary table. The client only uses
-  // them as opaque tokens between upload and send-message.
-  @column({ isPrimary: true })
+  // Numeric id is kept for internal FK joins but hidden from responses.
+  @column({ isPrimary: true, serializeAs: null })
   declare id: number
+
+  // Public identifier — always serialised as `id`.
+  @column({ serializeAs: 'id' })
+  declare uuid: string
 
   @column({ serializeAs: null })
   declare messageId: number | null
@@ -40,4 +44,11 @@ export default class MessageAttachment extends BaseModel {
 
   @belongsTo(() => Message)
   declare message: BelongsTo<typeof Message>
+
+  @beforeCreate()
+  static assignUuid(attachment: MessageAttachment) {
+    if (!attachment.uuid) {
+      attachment.uuid = randomUUID()
+    }
+  }
 }

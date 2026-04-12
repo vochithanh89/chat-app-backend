@@ -1,4 +1,5 @@
 import type { HttpContext } from '@adonisjs/core/http'
+import app from '@adonisjs/core/services/app'
 import { DateTime } from 'luxon'
 import db from '@adonisjs/lucid/services/db'
 import Conversation from '#models/conversation'
@@ -16,6 +17,7 @@ import {
   transferOwnershipValidator,
   markReadValidator,
 } from '#validators/conversation'
+import { updateAvatarValidator } from '#validators/update_avatar'
 import messageService from '#services/message_service'
 import realtimeService from '#services/realtime_service'
 
@@ -238,6 +240,20 @@ export default class ConversationsController {
     })
 
     await conv.load('members', (q) => q.preload('user'))
+
+    // Realtime: make both users' sockets join the new conv room (so
+    // `message:new` reaches them without reconnecting) and notify their
+    // sidebars to insert the conversation. Without this the receiver
+    // only learns about the new 1-1 on a full page refresh.
+    await realtimeService.joinUserToConversation(me.id, conv)
+    await realtimeService.joinUserToConversation(otherId, conv)
+    realtimeService.emitToUser(me.id, 'conversation:joined', {
+      conversationId: conv.uuid,
+    })
+    realtimeService.emitToUser(otherId, 'conversation:joined', {
+      conversationId: conv.uuid,
+    })
+
     return ApiResponse.created(response, 'Conversation created.', { conversation: conv })
   }
 
@@ -675,5 +691,48 @@ export default class ConversationsController {
     })
 
     return ApiResponse.ok(response, 'OK', { lastReadAt: now })
+  }
+
+  /**
+   * @updateAvatar
+   * @operationId updateGroupAvatar
+   * @description Uploads and sets the avatar image of a group conversation. Owner or admin only.
+   * @paramPath id - Conversation ID.
+   * @requestBody {"avatar": "file"}
+   * @responseBody 200 - {"success": true, "message": "string", "data": {"conversation": "object"}}
+   * @responseBody 403 - {"success": false, "message": "Forbidden.", "errors": []}
+   */
+  public async updateAvatar({ params, request, response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const conv = await resolveByUuid(params.id)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
+    if (conv.type !== 'group') {
+      return ApiResponse.error(response, 400, 'Only groups have avatars.')
+    }
+    const myMember = await messageService.assertMember(conv.id, me.id)
+    if (!myMember || (myMember.role !== 'owner' && myMember.role !== 'admin')) {
+      return ApiResponse.error(response, 403, 'Only owner or admin can change the avatar.')
+    }
+
+    const { avatar } = await request.validateUsing(updateAvatarValidator)
+
+    const fileName = `group_${conv.id}_${Date.now()}.${avatar.extname}`
+    await avatar.move(app.makePath('public/uploads/group-avatars'), {
+      name: fileName,
+      overwrite: true,
+    })
+
+    const publicPath = `/uploads/group-avatars/${fileName}`
+    const baseUrl = `${request.protocol()}://${request.host()}`
+    conv.avatarUrl = `${baseUrl}${publicPath}`
+    await conv.save()
+
+    // Notify every member so their sidebar icon + chat header refresh.
+    realtimeService.emitToConversation(conv.id, 'conversation:members-changed', {
+      conversationId: conv.uuid,
+    })
+
+    await conv.load('members', (q) => q.preload('user'))
+    return ApiResponse.ok(response, 'Group avatar updated.', { conversation: conv })
   }
 }

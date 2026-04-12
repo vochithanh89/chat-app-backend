@@ -90,7 +90,7 @@ export default class MessagesController {
    * @operationId sendMessage
    * @description Sends a message to a conversation. Broadcasts via WebSocket.
    * @paramPath conversationId - Conversation ID.
-   * @requestBody {"content": "string", "reply_to_message_id": "number", "attachment_ids": "number[]"}
+   * @requestBody {"content": "string", "reply_to_message_id": "string", "attachment_ids": "string[]"}
    * @responseBody 201 - {"success": true, "message": "string", "data": {"message": "object"}}
    * @responseBody 422 - {"success": false, "message": "Validation failed.", "errors": [{"field": "string", "message": "string"}]}
    */
@@ -103,12 +103,33 @@ export default class MessagesController {
     if (!member) return ApiResponse.error(response, 403, 'Not a member.')
 
     const payload = await request.validateUsing(sendMessageValidator)
+
+    // Public API uses UUIDs; resolve them to the internal numeric FKs
+    // the messages table actually stores.
+    let replyToMessageId: number | undefined
+    if (payload.reply_to_message_id) {
+      const replyTarget = await Message.findBy('uuid', payload.reply_to_message_id)
+      if (!replyTarget || replyTarget.conversationId !== conversationId) {
+        return ApiResponse.error(response, 400, 'Reply target not found in this conversation.')
+      }
+      replyToMessageId = replyTarget.id
+    }
+
+    let attachmentIds: number[] | undefined
+    if (payload.attachment_ids && payload.attachment_ids.length > 0) {
+      const rows = await MessageAttachment.query()
+        .whereIn('uuid', payload.attachment_ids)
+        .andWhere('uploaded_by', me.id)
+        .whereNull('message_id')
+      attachmentIds = rows.map((r) => r.id)
+    }
+
     const message = await messageService.createMessage({
       conversationId,
       senderId: me.id,
       content: payload.content,
-      replyToMessageId: payload.reply_to_message_id,
-      attachmentIds: payload.attachment_ids,
+      replyToMessageId,
+      attachmentIds,
     })
 
     return ApiResponse.created(response, 'Message sent.', {
