@@ -7,9 +7,7 @@ export default class extends BaseSchema {
     this.schema.alterTable(this.tableName, (table) => {
       table.uuid('uuid').nullable()
     })
-    this.schema.raw(
-      `UPDATE ${this.tableName} SET uuid = UUID() WHERE uuid IS NULL`
-    )
+    this.schema.raw(`UPDATE ${this.tableName} SET uuid = UUID() WHERE uuid IS NULL`)
     this.schema.alterTable(this.tableName, (table) => {
       table.uuid('uuid').notNullable().unique().alter()
     })

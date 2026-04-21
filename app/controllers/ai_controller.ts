@@ -42,10 +42,7 @@ export default class AiController {
     }
 
     const conv = await db.transaction(async (trx) => {
-      const c = await Conversation.create(
-        { type: 'direct', createdBy: me.id },
-        { client: trx }
-      )
+      const c = await Conversation.create({ type: 'direct', createdBy: me.id }, { client: trx })
       await ConversationMember.createMany(
         [
           { conversationId: c.id, userId: me.id, role: 'member', joinedAt: DateTime.now() },

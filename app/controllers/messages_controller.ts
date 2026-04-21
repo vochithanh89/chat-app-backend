@@ -244,10 +244,7 @@ export default class MessagesController {
     const member = await messageService.assertMember(message.conversationId, me.id)
     if (!member) return ApiResponse.error(response, 403, 'Not a member.')
 
-    await MessageReaction.firstOrCreate(
-      { messageId: message.id, userId: me.id, emoji },
-      { messageId: message.id, userId: me.id, emoji }
-    )
+    await MessageReaction.create({ messageId: message.id, userId: me.id, emoji })
     realtime.emitToConversation(message.conversationId, 'message:reaction:added', {
       messageId: message.uuid,
       userId: me.uuid,

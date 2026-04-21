@@ -11,9 +11,7 @@ export default class extends BaseSchema {
 
     // Backfill existing rows with a MySQL UUID(). Safe to re-run — only
     // touches rows that don't already have a uuid.
-    this.schema.raw(
-      `UPDATE ${this.tableName} SET uuid = UUID() WHERE uuid IS NULL`
-    )
+    this.schema.raw(`UPDATE ${this.tableName} SET uuid = UUID() WHERE uuid IS NULL`)
 
     // Now enforce NOT NULL + UNIQUE.
     this.schema.alterTable(this.tableName, (table) => {

@@ -37,20 +37,12 @@ export default class HttpExceptionHandler extends ExceptionHandler {
     // Generic HttpException with status
     const anyErr = error as any
     if (anyErr && typeof anyErr.status === 'number') {
-      return ApiResponse.error(
-        ctx.response,
-        anyErr.status,
-        anyErr.message ?? 'Request failed.'
-      )
+      return ApiResponse.error(ctx.response, anyErr.status, anyErr.message ?? 'Request failed.')
     }
 
     // Fallback 500
     if (this.debug) {
-      return ApiResponse.error(
-        ctx.response,
-        500,
-        anyErr?.message ?? 'Internal server error.'
-      )
+      return ApiResponse.error(ctx.response, 500, anyErr?.message ?? 'Internal server error.')
     }
     return ApiResponse.error(ctx.response, 500, 'Internal server error.')
   }

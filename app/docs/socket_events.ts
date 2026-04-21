@@ -10,15 +10,9 @@
  * Keep this file in sync with any `realtimeService.emit*(...)` call.
  */
 
-export type SocketDirection =
-  | 'server→client'
-  | 'client→server'
+export type SocketDirection = 'server→client' | 'client→server' | 'client↔server'
 
-export type SocketTarget =
-  | 'user room'
-  | 'conversation room'
-  | 'broadcast'
-  | 'own socket'
+export type SocketTarget = 'user room' | 'conversation room' | 'broadcast' | 'own socket'
 
 export interface SocketEventDoc {
   event: string
@@ -89,8 +83,7 @@ export const socketEventGroups: SocketEventGroup[] = [
         event: 'friend:request:received',
         direction: 'server→client',
         target: 'user room',
-        description:
-          'Someone sent the current user a friend request. Delivered to the addressee.',
+        description: 'Someone sent the current user a friend request. Delivered to the addressee.',
         payload: {
           friendshipId: 'string (uuid)',
           from: '{ id: string (uuid), name: string, avatarUrl: string | null }',
@@ -115,8 +108,7 @@ export const socketEventGroups: SocketEventGroup[] = [
         event: 'friend:request:accepted',
         direction: 'server→client',
         target: 'user room',
-        description:
-          'The original requester is told their friend request was accepted.',
+        description: 'The original requester is told their friend request was accepted.',
         payload: {
           friendshipId: 'string (uuid)',
           by: '{ id: string (uuid), name: string, avatarUrl: string | null }',
@@ -150,8 +142,7 @@ export const socketEventGroups: SocketEventGroup[] = [
         event: 'friend:request:cancelled',
         direction: 'server→client',
         target: 'user room',
-        description:
-          'The addressee is told the requester has cancelled the pending request.',
+        description: 'The addressee is told the requester has cancelled the pending request.',
         payload: {
           friendshipId: 'string (uuid)',
           by: '{ id: string (uuid) }',
@@ -213,6 +204,96 @@ export const socketEventGroups: SocketEventGroup[] = [
     ],
   },
   {
+    name: 'VoIP & Video Call',
+    description:
+      'WebRTC signaling for 1-on-1 calls. The server acts as a simple relay. The flow is: Client A sends `call:request` with an offer → Server forwards a `call:incoming` to Client B → Client B sends `call:answer` → Server forwards `call:accepted` to Client A → Both clients exchange ICE candidates via `call:ice-candidate` until a peer-to-peer connection is established.',
+    events: [
+      {
+        event: 'call:request',
+        direction: 'client→server',
+        target: 'user room',
+        description: 'Initiate a call by sending an offer to another user.',
+        payload: {
+          to: 'string (userId)',
+          offer: 'RTCSessionDescriptionInit',
+          type: "'video' | 'audio'",
+          conversationId: 'string (uuid)',
+        },
+        emittedFrom: 'client',
+      },
+      {
+        event: 'call:incoming',
+        direction: 'server→client',
+        target: 'user room',
+        description: 'Forwarded from a `call:request`, notifying the user of an incoming call.',
+        payload: {
+          from: 'string (userId)',
+          offer: 'RTCSessionDescriptionInit',
+          type: "'video' | 'audio'",
+          conversationId: 'string (uuid)',
+        },
+        emittedFrom: 'realtime_service call listener',
+      },
+      {
+        event: 'call:answer',
+        direction: 'client→server',
+        target: 'user room',
+        description: 'Answer a call by sending an answer back to the original caller.',
+        payload: {
+          to: 'string (userId)',
+          answer: 'RTCSessionDescriptionInit',
+          conversationId: 'string (uuid)',
+        },
+        emittedFrom: 'client',
+      },
+      {
+        event: 'call:accepted',
+        direction: 'server→client',
+        target: 'user room',
+        description: "Forwarded from a `call:answer`, notifying the caller their offer was accepted.",
+        payload: {
+          from: 'string (userId)',
+          answer: 'RTCSessionDescriptionInit',
+        },
+        emittedFrom: 'realtime_service call listener',
+      },
+      {
+        event: 'call:ice-candidate',
+        direction: 'client↔server',
+        target: 'user room',
+        description: 'Exchange ICE candidates to establish the peer-to-peer connection.',
+        payload: {
+          to: 'string (userId)',
+          candidate: 'RTCIceCandidateInit',
+          conversationId: 'string (uuid)',
+        },
+        emittedFrom: 'client / realtime_service call listener',
+      },
+      {
+        event: 'call:reject',
+        direction: 'client↔server',
+        target: 'user room',
+        description: 'The recipient rejected the call. Relayed to the caller.',
+        payload: {
+          to: 'string (userId)',
+          conversationId: 'string (uuid)',
+        },
+        emittedFrom: 'client / realtime_service call listener',
+      },
+      {
+        event: 'call:hangup',
+        direction: 'client↔server',
+        target: 'user room',
+        description: 'One of the parties ended the call. Relayed to the other party.',
+        payload: {
+          to: 'string (userId)',
+          conversationId: 'string (uuid)',
+        },
+        emittedFrom: 'client / realtime_service call listener',
+      },
+    ],
+  },
+  {
     name: 'Conversation membership',
     description:
       'Lifecycle events for conversation rooms. When a user is added to a conversation the server automatically joins every socket of that user to the room AND updates the per-socket UUID→internal-id cache, so subsequent `message:new` / `typing` / `conversation:read` events reach the new member without reconnecting.',
@@ -233,8 +314,7 @@ export const socketEventGroups: SocketEventGroup[] = [
         description:
           'The user is no longer a member (kicked, they left, or the group was disbanded). Clients drop the conversation from the sidebar; any open chat on this conversation navigates back to `/chat`.',
         payload: { conversationId: 'string (uuid)' },
-        emittedFrom:
-          'ConversationsController.removeMember / leave / disband',
+        emittedFrom: 'ConversationsController.removeMember / leave / disband',
       },
       {
         event: 'conversation:members-changed',
@@ -243,15 +323,14 @@ export const socketEventGroups: SocketEventGroup[] = [
         description:
           "A member was added, removed, or left. Remaining members should refetch the conversation so the open GroupInfoDialog's member list is in sync.",
         payload: { conversationId: 'string (uuid)' },
-        emittedFrom:
-          'ConversationsController.addMembers / removeMember / leave',
+        emittedFrom: 'ConversationsController.addMembers / removeMember / leave',
       },
       {
         event: 'conversation:read',
         direction: 'server→client',
         target: 'conversation room',
         description:
-          "A member has marked the conversation as read up to `lastMessageId`. Clients use this to render read receipts (mini avatars under the latest own message the reader has seen).",
+          'A member has marked the conversation as read up to `lastMessageId`. Clients use this to render read receipts (mini avatars under the latest own message the reader has seen).',
         payload: {
           conversationId: 'string (uuid)',
           userId: 'string (uuid)',
@@ -364,9 +443,7 @@ export const socketEventGroups: SocketEventGroup[] = [
 
 function renderPayload(payload?: Record<string, string>): string {
   if (!payload || Object.keys(payload).length === 0) return '_(no payload)_'
-  const lines = Object.entries(payload).map(
-    ([k, v]) => `  - \`${k}\`: ${v}`
-  )
+  const lines = Object.entries(payload).map(([k, v]) => `  - \`${k}\`: ${v}`)
   return lines.join('\n')
 }
 
@@ -392,7 +469,7 @@ export function buildSocketEventsMarkdown(): string {
     '',
     '### Authenticating',
     '',
-    "Pass the JWT access token when creating the client:",
+    'Pass the JWT access token when creating the client:',
     '',
     '```js',
     "import { io } from 'socket.io-client'",

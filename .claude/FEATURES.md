@@ -5,27 +5,32 @@ Phân chia chức năng backend theo 5 module. Dùng file này để tra cứu s
 ---
 
 ## Module 1 — Core Authentication & User Management
+
 Quản lý User, bảo mật và vận hành hạ tầng.
 
 **Auth flow**
+
 - Login / Logout / Refresh Token (JWT).
 - Đăng ký tài khoản mới + xác thực qua **OTP Email/SMS**.
 - Quên mật khẩu / Đổi mật khẩu.
 
 **Profile**
+
 - Cập nhật hồ sơ cá nhân: name, bio, avatar URL.
 - Upload avatar.
 
 **Presence**
-- Cập nhật `is_online` và `last_seen_at` mỗi khi user truy cập/thoát app.
 
+- Cập nhật `is_online` và `last_seen_at` mỗi khi user truy cập/thoát app.
 
 ---
 
 ## Module 2 — Friendship & Notification System
+
 Bạn bè và hệ thống thông báo.
 
 **Friendship APIs**
+
 - Tìm kiếm user (theo số điện thoại, email, tên).
 - Gửi lời mời kết bạn (Friend Request).
 - Đồng ý / Từ chối lời mời.
@@ -33,20 +38,24 @@ Bạn bè và hệ thống thông báo.
 - Hủy kết bạn (Unfriend).
 
 **Push Notification**
+
 - Tích hợp **Firebase Cloud Messaging (FCM)**.
 - Push khi: có lời mời kết bạn mới, có người nhắc tên (@mention).
 
 ---
 
 ## Module 3 — Conversation & Group Management
+
 Quản lý nhóm và đoạn chat.
 
 **Conversation**
+
 - Khởi tạo chat 1-1 với bạn bè.
 - Tạo group chat với nhiều thành viên.
 - Lấy danh sách conversations của user (sắp xếp theo thời gian tin nhắn mới nhất).
 
 **Group management**
+
 - Thêm / Xóa thành viên, Tự rời nhóm.
 - Phân quyền: bổ nhiệm phó nhóm, chuyển quyền trưởng nhóm.
 - Giải tán nhóm (chỉ trưởng nhóm).
@@ -54,13 +63,16 @@ Quản lý nhóm và đoạn chat.
 ---
 
 ## Module 4 — Messaging Core & Media Storage
+
 Lõi nhắn tin realtime và lưu trữ media.
 
 **Realtime transport**
+
 - Cấu hình **WebSocket / STOMP**.
 - API gửi/nhận tin nhắn text qua WebSocket.
 
 **Tin nhắn nâng cao**
+
 - Thu hồi tin nhắn (`is_recalled = true`).
 - Xóa tin nhắn phía người dùng (`is_deleted = true`).
 - Reply — `reply_to_message_id`.
@@ -70,16 +82,20 @@ Lõi nhắn tin realtime và lưu trữ media.
 ---
 
 ## Module 5 — AI Integration & Admin / Statistics
+
 Tích hợp AI và quản trị.
 
 **AI Chatbot Assistant**
+
 - Tích hợp LLM API (**Google Gemini** / **OpenAI ChatGPT**).
 - Flow: user chat với AI → backend forward prompt sang LLM → trả response về user.
 
 **Reports**
+
 - API cho user báo cáo user khác hoặc báo cáo tin nhắn vi phạm.
 
 **Admin — Thống kê & Quản trị**
+
 - Thống kê tài khoản đăng ký mới, số lượng group chat.
 - Biểu đồ số lượng tin nhắn theo ngày / tuần / tháng.
 - Khóa / Mở khóa tài khoản (`account_status` do Admin thao tác).
@@ -87,6 +103,7 @@ Tích hợp AI và quản trị.
 ---
 
 ## Trạng thái hiện tại
+
 - [x] Module 1: login, logout (revoke refresh token), refresh, register + OTP email verify, resend OTP, forgot/reset password, change password.
 - [x] Module 1: update profile (name, bio), upload avatar (local — TODO: chuyển Cloudinary/S3 ở Module 4), presence (`is_online`, `last_seen_at`) qua middleware + heartbeat/offline endpoints.
 - [x] Chuẩn hóa response format (`ApiResponse` helper + global exception handler bắt VineJS / auth / runtime errors).

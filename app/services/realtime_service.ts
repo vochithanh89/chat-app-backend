@@ -36,10 +36,6 @@ class RealtimeService {
     this.io = new IOServer(httpServer, {
       cors: { origin: '*' },
       path: '/socket.io',
-      // Tighter heartbeats so abrupt disconnects (network drop, tab crash,
-      // laptop sleep) are detected in ~12s instead of the default ~45s.
-      // Clean tab closes are detected immediately via the WebSocket close
-      // frame and do not wait for the heartbeat.
       pingInterval: 10_000,
       pingTimeout: 5_000,
     })
@@ -55,7 +51,6 @@ class RealtimeService {
         const payload = jwt.verify(token, secret) as any
         const userId = Number(payload?.userId ?? payload?.sub ?? payload?.id)
         if (!userId) return next(new Error('Invalid token payload'))
-
         ;(socket as AuthedSocket).data.userId = userId
         next()
       } catch (err) {
@@ -64,14 +59,16 @@ class RealtimeService {
     })
 
     this.io.on('connection', async (socket) => {
-      const userId = (socket as AuthedSocket).data.userId
+      const authedSocket = socket as AuthedSocket
+      const userId = authedSocket.data.userId
       logger.info({ userId, socketId: socket.id }, 'socket connected')
 
-      // --- Register the disconnect listener FIRST, before any await, so
-      // we never lose a disconnect event if the socket drops while we are
-      // still doing initial setup (e.g. loading memberships from DB).
       socket.on('disconnect', (reason) => {
         logger.info({ userId, socketId: socket.id, reason }, 'socket disconnected')
+        // Note: We don't broadcast a `group-call:leave` here because abrupt
+        // disconnects should be handled by the client-side WebRTC connection
+        // state listeners (`onconnectionstatechange`). This backend event
+        // is for explicit "leave" button clicks.
 
         const current = this.connections.get(userId) ?? 0
         const next = Math.max(0, current - 1)
@@ -83,15 +80,12 @@ class RealtimeService {
         }
       })
 
-      // --- Presence counter — also before any await so we never miss an
-      // increment that would leave the user stuck in the wrong state.
       const prevCount = this.connections.get(userId) ?? 0
       this.connections.set(userId, prevCount + 1)
       if (prevCount === 0) {
         void this.markOnline(userId, true)
       }
 
-      // Client-driven join/leave (pure sync, safe before the await).
       socket.on('conversation:join', (conversationId: number) => {
         socket.join(`conv:${conversationId}`)
       })
@@ -99,42 +93,88 @@ class RealtimeService {
         socket.leave(`conv:${conversationId}`)
       })
 
-      // Typing indicators — broadcast to other members of the
-      // conversation room, excluding the sender. Payload:
-      //   { conversationId: "uuid" }
-      // The server resolves the UUID via the pre-cached map so we
-      // don't touch the DB on every keystroke.
       socket.on('typing:start', (data: { conversationId?: string }) => {
         const convUuid = data?.conversationId
         if (!convUuid) return
-        const authed = socket as AuthedSocket
-        const internalId = authed.data.convUuidToId?.[convUuid]
+        const internalId = authedSocket.data.convUuidToId?.[convUuid]
         if (!internalId) return
         socket.to(`conv:${internalId}`).emit('typing:start', {
           conversationId: convUuid,
-          userId: authed.data.userUuid,
+          userId: authedSocket.data.userUuid,
         })
       })
       socket.on('typing:stop', (data: { conversationId?: string }) => {
         const convUuid = data?.conversationId
         if (!convUuid) return
-        const authed = socket as AuthedSocket
-        const internalId = authed.data.convUuidToId?.[convUuid]
+        const internalId = authedSocket.data.convUuidToId?.[convUuid]
         if (!internalId) return
         socket.to(`conv:${internalId}`).emit('typing:stop', {
           conversationId: convUuid,
-          userId: authed.data.userUuid,
+          userId: authedSocket.data.userUuid,
         })
       })
 
-      // Personal + conversation rooms.
+      // --- 1-on-1 WebRTC signaling ---
+      socket.on('call:request', (payload) => {
+        this.emitToUser(payload.to, 'call:incoming', {
+          from: authedSocket.data.userUuid,
+          ...payload,
+        })
+      })
+      socket.on('call:answer', (payload) => {
+        this.emitToUser(payload.to, 'call:accepted', {
+          from: authedSocket.data.userUuid,
+          ...payload,
+        })
+      })
+      socket.on('call:ice-candidate', (payload) => {
+        this.emitToUser(payload.to, 'call:ice-candidate', {
+          from: authedSocket.data.userUuid,
+          ...payload,
+        })
+      })
+      socket.on('call:reject', (payload) => {
+        this.emitToUser(payload.to, 'call:reject', {
+          from: authedSocket.data.userUuid,
+          ...payload,
+        })
+      })
+      socket.on('call:hangup', (payload) => {
+        this.emitToUser(payload.to, 'call:hangup', {
+          from: authedSocket.data.userUuid,
+          ...payload,
+        })
+      })
+
+      // --- Group Call Signaling (Broadcast Relay) ---
+      const groupCallRelay = (eventName: string) => (payload: { conversationId: string }) => {
+        const { conversationId } = payload
+        const internalId = authedSocket.data.convUuidToId?.[conversationId]
+        if (!internalId) {
+          logger.warn({ payload }, `group-call relay: invalid conversationId`)
+          return
+        }
+        // Broadcast to all OTHER members in the room.
+        // The frontend will handle signal targeting.
+        socket.to(`conv:${internalId}`).emit(eventName, {
+          from: authedSocket.data.userUuid,
+          ...payload,
+        })
+      }
+
+      socket.on('group-call:ring', groupCallRelay('group-call:ring'))
+      socket.on('group-call:join', groupCallRelay('group-call:join'))
+      socket.on('group-call:signal', groupCallRelay('group-call:signal'))
+      socket.on('group-call:leave', groupCallRelay('group-call:leave'))
+
+      // --- Room Setup ---
       socket.join(`user:${userId}`)
       try {
-        // Load the user's UUID + all memberships (with conversation
-        // UUIDs) once per connection. These feed the transient-event
-        // cache described above.
         const user = await User.find(userId)
-        ;(socket as AuthedSocket).data.userUuid = user?.uuid
+        if (user?.uuid) {
+          authedSocket.data.userUuid = user.uuid
+          socket.join(`user:${user.uuid}`)
+        }
 
         const memberships = await ConversationMember.query()
           .where('user_id', userId)
@@ -145,7 +185,7 @@ class RealtimeService {
           socket.join(`conv:${m.conversationId}`)
           if (m.conversation?.uuid) convMap[m.conversation.uuid] = m.conversationId
         }
-        ;(socket as AuthedSocket).data.convUuidToId = convMap
+        authedSocket.data.convUuidToId = convMap
       } catch (err) {
         logger.warn({ err, userId }, 'failed to load memberships on connect')
       }
@@ -159,20 +199,11 @@ class RealtimeService {
     this.io.to(`conv:${conversationId}`).emit(event, payload)
   }
 
-  emitToUser(userId: number, event: string, payload: unknown): void {
+  emitToUser(userId: number | string, event: string, payload: unknown): void {
     if (!this.io) return
     this.io.to(`user:${userId}`).emit(event, payload)
   }
 
-  /**
-   * Make every currently-connected socket for `userId` join the
-   * conversation's socket.io room and remember its public UUID in the
-   * per-socket cache used by transient events (typing, etc.).
-   *
-   * Call this right after a user gains membership to a conversation so
-   * they start receiving `message:new` / `conversation:read` / typing
-   * events without having to reconnect.
-   */
   async joinUserToConversation(userId: number, conversation: Conversation): Promise<void> {
     if (!this.io) return
     try {
@@ -185,21 +216,11 @@ class RealtimeService {
         }
       }
     } catch (err) {
-      logger.warn(
-        { err, userId, conversationId: conversation.id },
-        'joinUserToConversation failed'
-      )
+      logger.warn({ err, userId, conversationId: conversation.id }, 'joinUserToConversation failed')
     }
   }
 
-  /**
-   * Reverse of joinUserToConversation — remove every socket for
-   * `userId` from the conversation room and clear the cache entry.
-   */
-  async leaveUserFromConversation(
-    userId: number,
-    conversationId: number
-  ): Promise<void> {
+  async leaveUserFromConversation(userId: number, conversationId: number): Promise<void> {
     if (!this.io) return
     try {
       const sockets = await this.io.in(`user:${userId}`).fetchSockets()
@@ -215,17 +236,10 @@ class RealtimeService {
         }
       }
     } catch (err) {
-      logger.warn(
-        { err, userId, conversationId },
-        'leaveUserFromConversation failed'
-      )
+      logger.warn({ err, userId, conversationId }, 'leaveUserFromConversation failed')
     }
   }
 
-  /**
-   * Persist an online/offline flip to the DB and fan out a
-   * `presence:changed` event so friends can update their UIs.
-   */
   private async markOnline(userId: number, online: boolean): Promise<void> {
     try {
       const user = await User.find(userId)
@@ -234,12 +248,9 @@ class RealtimeService {
       user.lastSeenAt = DateTime.now()
       await user.save()
 
-      // Let interested clients know. Broadcast globally for now — it's a
-      // single room lookup per subscriber. If this becomes noisy we can
-      // narrow it down to the friends of the user only.
       if (this.io) {
         this.io.emit('presence:changed', {
-          userId,
+          userId: user.uuid,
           isOnline: online,
           lastSeenAt: user.lastSeenAt,
         })

@@ -1,6 +1,7 @@
 # Project Conventions
 
 ## Stack
+
 - Framework: **AdonisJS v6** (TypeScript, ESM).
 - ORM: Lucid. Auth: `@adonisjs/auth` (JWT + refresh tokens).
 - Mail: `@adonisjs/mail`. Validation: VineJS validators in `app/validators/`.
@@ -8,6 +9,7 @@
 ## API Rules (bắt buộc)
 
 ### 1. Swagger documentation
+
 Mọi API endpoint mới **bắt buộc** phải có JSDoc block theo format của `adonis-autoswagger` ngay phía trên method controller:
 
 ```ts
@@ -26,6 +28,7 @@ public async handler({ request, response }: HttpContext) { ... }
 - Sau khi thêm route, kiểm tra `/docs` vẫn render được.
 
 ### 2. Migrations
+
 - Nếu thay đổi schema (thêm cột, bảng, index...), **luôn tạo migration mới** trong `database/migrations/`.
 - Không sửa migration cũ đã commit. Đặt tên mô tả rõ: `add_<column>_to_<table>_table.ts`.
 - Model phải được cập nhật đồng bộ với migration.
@@ -33,6 +36,7 @@ public async handler({ request, response }: HttpContext) { ... }
 ### 3. Response format chuẩn
 
 **Success response** — mọi endpoint trả về cùng shape:
+
 ```json
 {
   "success": true,
@@ -42,13 +46,12 @@ public async handler({ request, response }: HttpContext) { ... }
 ```
 
 **Error response** (validation + runtime + auth) — shape duy nhất:
+
 ```json
 {
   "success": false,
   "message": "string",
-  "errors": [
-    { "field": "email", "message": "The email field must be a valid email" }
-  ]
+  "errors": [{ "field": "email", "message": "The email field must be a valid email" }]
 }
 ```
 
@@ -58,12 +61,15 @@ public async handler({ request, response }: HttpContext) { ... }
 - Controller nên dùng helper thống nhất (ví dụ `response.ok({ success: true, message, data })`) thay vì tự bịa shape mới.
 
 ### 4. Controller conventions
+
 - Validate bằng `request.validateUsing(<validator>)` — không validate thủ công.
 - Không trả raw model khi có field nhạy cảm; model đã đánh dấu `serializeAs: null` cho `password`.
 - Secret/token sinh bằng `@adonisjs/core/helpers` (`cuid`) hoặc `crypto.randomBytes`. OTP dùng số 6 chữ số.
 
 ## Khi Claude thêm/sửa API
+
 Checklist bắt buộc trước khi kết thúc task:
+
 1. Đã thêm Swagger JSDoc block?
 2. Có migration mới nếu schema đổi?
 3. Response (success + error) đã đúng format chuẩn?

@@ -31,8 +31,7 @@ export default class FriendsController {
    */
   public async sendRequest({ request, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const { addressee_id: addresseeUuid } =
-      await request.validateUsing(sendFriendRequestValidator)
+    const { addressee_id: addresseeUuid } = await request.validateUsing(sendFriendRequestValidator)
 
     const target = await resolveUser(addresseeUuid)
     if (!target) {

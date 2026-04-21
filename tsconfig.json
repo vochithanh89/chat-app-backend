@@ -2,6 +2,15 @@
   "extends": "@adonisjs/tsconfig/tsconfig.app.json",
   "compilerOptions": {
     "rootDir": "./",
-    "outDir": "./build"
+    "outDir": "./build",
+    "moduleResolution": "NodeNext",
+    "baseUrl": ".",
+    "paths": {
+      "#models/*.js": ["./app/models/*.ts"],
+      "#controllers/*.js": ["./app/controllers/*.ts"],
+      "#services/*.js": ["./app/services/*.ts"],
+      "#validators/*.js": ["./app/validators/*.ts"],
+      "#config/*.js": ["./config/*.ts"]
+    }
   }
 }

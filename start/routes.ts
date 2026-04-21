@@ -38,9 +38,7 @@ router
     router
       .post('/auth/forgot-password', [AuthController, 'forgotPassword'])
       .as('auth.forgotPassword')
-    router
-      .post('/auth/reset-password', [AuthController, 'resetPassword'])
-      .as('auth.resetPassword')
+    router.post('/auth/reset-password', [AuthController, 'resetPassword']).as('auth.resetPassword')
 
     // Auth-only (JWT)
     router
@@ -89,16 +87,12 @@ router
         router
           .delete('/friends/requests/:id', [FriendsController, 'cancel'])
           .as('friends.requests.cancel')
-        router
-          .delete('/friends/:userId', [FriendsController, 'unfriend'])
-          .as('friends.unfriend')
+        router.delete('/friends/:userId', [FriendsController, 'unfriend']).as('friends.unfriend')
 
         // Blocking
         router.get('/blocks', [BlocksController, 'list']).as('blocks.list')
         router.post('/blocks', [BlocksController, 'block']).as('blocks.block')
-        router
-          .delete('/blocks/:userId', [BlocksController, 'unblock'])
-          .as('blocks.unblock')
+        router.delete('/blocks/:userId', [BlocksController, 'unblock']).as('blocks.unblock')
 
         // Conversations
         router
@@ -107,12 +101,8 @@ router
         router
           .post('/conversations/group', [ConversationsController, 'createGroup'])
           .as('conversations.createGroup')
-        router
-          .get('/conversations', [ConversationsController, 'list'])
-          .as('conversations.list')
-        router
-          .get('/conversations/:id', [ConversationsController, 'show'])
-          .as('conversations.show')
+        router.get('/conversations', [ConversationsController, 'list']).as('conversations.list')
+        router.get('/conversations/:id', [ConversationsController, 'show']).as('conversations.show')
         router
           .post('/conversations/:id/members', [ConversationsController, 'addMembers'])
           .as('conversations.addMembers')
@@ -151,18 +141,12 @@ router
         router
           .post('/messages/upload', [MessagesController, 'uploadAttachment'])
           .as('messages.upload')
-        router
-          .post('/messages/:id/recall', [MessagesController, 'recall'])
-          .as('messages.recall')
+        router.post('/messages/:id/recall', [MessagesController, 'recall']).as('messages.recall')
         router
           .post('/messages/:id/delete', [MessagesController, 'deleteForMe'])
           .as('messages.deleteForMe')
-        router
-          .post('/messages/:id/forward', [MessagesController, 'forward'])
-          .as('messages.forward')
-        router
-          .post('/messages/:id/reactions', [MessagesController, 'react'])
-          .as('messages.react')
+        router.post('/messages/:id/forward', [MessagesController, 'forward']).as('messages.forward')
+        router.post('/messages/:id/reactions', [MessagesController, 'react']).as('messages.react')
         router
           .delete('/messages/:id/reactions/:emoji', [MessagesController, 'unreact'])
           .as('messages.unreact')

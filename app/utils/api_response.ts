@@ -32,12 +32,7 @@ export const ApiResponse = {
     return response.created(<ApiSuccessBody<T>>{ success: true, message, data })
   },
 
-  error(
-    response: Response,
-    status: number,
-    message: string,
-    errors: ApiErrorItem[] = []
-  ) {
+  error(response: Response, status: number, message: string, errors: ApiErrorItem[] = []) {
     return response.status(status).send(<ApiErrorBody>{
       success: false,
       message,
