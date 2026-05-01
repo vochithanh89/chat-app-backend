@@ -721,4 +721,63 @@ export default class ConversationsController {
     await conv.load('members', (q) => q.preload('user'))
     return ApiResponse.ok(response, 'Group avatar updated.', { conversation: conv })
   }
+
+  /**
+   * @toggleMute
+   * @operationId toggleMuteConversation
+   * @description Toggles mute status for the current user in a conversation.
+   * @paramPath id - Conversation ID.
+   * @responseBody 200 - {"success": true, "message": "string", "data": {"isMuted": "boolean"}}
+   */
+  public async toggleMute({ params, response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const conv = await resolveByUuid(params.id)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
+
+    const myMember = await messageService.assertMember(conv.id, me.id)
+    if (!myMember) {
+      return ApiResponse.error(response, 403, 'Not a member of this conversation.')
+    }
+
+    myMember.isMuted = !myMember.isMuted
+    await myMember.save()
+
+    return ApiResponse.ok(response, 'Mute status updated.', { isMuted: myMember.isMuted })
+  }
+
+  /**
+   * @togglePin
+   * @operationId togglePinConversation
+   * @description Toggles pin status for the current user in a conversation.
+   * @paramPath id - Conversation ID.
+   * @responseBody 200 - {"success": true, "message": "string", "data": {"isPinned": "boolean"}}
+   */
+  public async togglePin({ params, response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const conv = await resolveByUuid(params.id)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
+
+    const myMember = await messageService.assertMember(conv.id, me.id)
+    if (!myMember) {
+      return ApiResponse.error(response, 403, 'Not a member of this conversation.')
+    }
+
+    myMember.isPinned = !myMember.isPinned
+    
+    // If pinning, set pin_order to current timestamp for sorting
+    if (myMember.isPinned) {
+      const maxOrder = await ConversationMember.query()
+        .where('user_id', me.id)
+        .andWhere('is_pinned', true)
+        .max('pin_order as maxOrder')
+        .first()
+      myMember.pinOrder = (maxOrder?.maxOrder ?? 0) + 1
+    } else {
+      myMember.pinOrder = null
+    }
+    
+    await myMember.save()
+
+    return ApiResponse.ok(response, 'Pin status updated.', { isPinned: myMember.isPinned })
+  }
 }

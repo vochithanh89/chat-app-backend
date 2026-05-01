@@ -189,7 +189,7 @@ class MessageService {
     return created
   }
 
-  async serialize(m: Message): Promise<Record<string, unknown>> {
+  async serialize(m: Message, viewerUserId?: number): Promise<Record<string, unknown>> {
     const [conversationUuid, replyUuid, forwardedUuid] = await Promise.all([
       getConversationUuid(m.conversationId),
       getMessageUuid(m.replyToMessageId),
@@ -205,16 +205,36 @@ class MessageService {
     // Translate reaction userIds to UUIDs in a single batched lookup.
     const reactionUserMap = await getUserUuids(reactions.map((r) => r.userId))
 
+    // isStarred — only meaningful when we know who's viewing
+    let isStarred = false
+    if (viewerUserId) {
+      const { default: MessageStar } = await import('#models/message_star')
+      const star = await MessageStar.query()
+        .where('message_id', m.id)
+        .andWhere('user_id', viewerUserId)
+        .first()
+      isStarred = Boolean(star)
+    }
+
+    // pinnedBy UUID
+    let pinnedByUuid: string | null = null
+    if (m.pinnedBy) {
+      const uuidMap = await getUserUuids([m.pinnedBy])
+      pinnedByUuid = uuidMap.get(m.pinnedBy) ?? null
+    }
+
     return {
       id: m.uuid,
-      // Every id in the payload is a UUID — internal numeric FKs never
-      // leak to clients.
       conversationId: conversationUuid,
       senderId: sender?.uuid ?? null,
       content: m.isRecalled ? null : m.content,
       replyToMessageId: replyUuid,
       forwardedFromId: forwardedUuid,
       isRecalled: m.isRecalled,
+      isPinned: m.isPinned ?? false,
+      pinnedBy: pinnedByUuid,
+      pinnedAt: m.pinnedAt ?? null,
+      isStarred,
       createdAt: m.createdAt,
       sender: sender
         ? {
