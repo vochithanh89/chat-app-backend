@@ -6,13 +6,13 @@ import Conversation from '#models/conversation'
 import Message from '#models/message'
 import Report from '#models/report'
 import { ApiResponse } from '#utils/api_response'
-import {
-  updateUserStatusValidator,
-  statsRangeValidator,
-} from '#validators/admin'
+import { updateUserStatusValidator, statsRangeValidator } from '#validators/admin'
 import { updateReportStatusValidator } from '#validators/report'
 
-function rangeStart(period: 'day' | 'week' | 'month', days?: number): { start: DateTime; bucket: string } {
+function rangeStart(
+  period: 'day' | 'week' | 'month',
+  days?: number
+): { start: DateTime; bucket: string } {
   const now = DateTime.now()
   if (period === 'day') {
     return { start: now.minus({ days: days ?? 30 }).startOf('day'), bucket: '%Y-%m-%d' }

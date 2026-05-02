@@ -109,11 +109,7 @@ class MessageService {
       loader.load('sender').load('attachments').load('reactions')
     })
 
-    realtime.emitToConversation(
-      conversationId,
-      'message:new',
-      await this.serialize(message)
-    )
+    realtime.emitToConversation(conversationId, 'message:new', await this.serialize(message))
 
     // Push notification to other members
     const otherMembers = await ConversationMember.query()
@@ -151,7 +147,10 @@ class MessageService {
     userId: number,
     conversationUuids: string[]
   ): Promise<Message[]> {
-    const original = await Message.query().where('id', messageId).preload('attachments').firstOrFail()
+    const original = await Message.query()
+      .where('id', messageId)
+      .preload('attachments')
+      .firstOrFail()
 
     // Resolve UUIDs → internal numeric ids in one query.
     const convs = await Conversation.query().whereIn('uuid', conversationUuids)

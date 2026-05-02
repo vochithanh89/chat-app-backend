@@ -2,10 +2,7 @@ import User from '#models/user'
 import DeviceToken from '#models/device_token'
 import { updateProfileValidator } from '#validators/update_profile'
 import { updateAvatarValidator } from '#validators/update_avatar'
-import {
-  searchUsersValidator,
-  registerDeviceTokenValidator,
-} from '#validators/friendship'
+import { searchUsersValidator, registerDeviceTokenValidator } from '#validators/friendship'
 import app from '@adonisjs/core/services/app'
 import { DateTime } from 'luxon'
 import type { HttpContext } from '@adonisjs/core/http'
@@ -138,10 +135,12 @@ export default class UsersController {
    */
   public async search({ request, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const { q, type = 'auto', page = 1, limit = 20 } = await request.validateUsing(
-      searchUsersValidator,
-      { data: request.qs() }
-    )
+    const {
+      q,
+      type = 'auto',
+      page = 1,
+      limit = 20,
+    } = await request.validateUsing(searchUsersValidator, { data: request.qs() })
 
     const query = User.query()
       .whereNot('id', me.id)
@@ -171,10 +170,7 @@ export default class UsersController {
       query.where('name', 'like', `%${q}%`)
     } else {
       query.where((sub) => {
-        sub
-          .where('name', 'like', `%${q}%`)
-          .orWhere('email', q)
-          .orWhere('phone', q)
+        sub.where('name', 'like', `%${q}%`).orWhere('email', q).orWhere('phone', q)
       })
     }
 

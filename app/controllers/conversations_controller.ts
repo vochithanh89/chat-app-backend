@@ -61,8 +61,8 @@ async function computeDirectBlockStatus(
 
   // One round-trip covers both directions of the relationship.
   const blocks = await UserBlock.query().where((q) => {
-    q.where((s) => s.where('blocker_id', meId).whereIn('blocked_id', otherIds)).orWhere(
-      (s) => s.whereIn('blocker_id', otherIds).where('blocked_id', meId)
+    q.where((s) => s.where('blocker_id', meId).whereIn('blocked_id', otherIds)).orWhere((s) =>
+      s.whereIn('blocker_id', otherIds).where('blocked_id', meId)
     )
   })
 
@@ -110,8 +110,8 @@ async function computeDirectFriendshipStatus(
 
   const otherIds = pairs.map((p) => p.otherId)
   const rows = await Friendship.query().where((q) => {
-    q.where((s) => s.where('requester_id', meId).whereIn('addressee_id', otherIds)).orWhere(
-      (s) => s.whereIn('requester_id', otherIds).where('addressee_id', meId)
+    q.where((s) => s.where('requester_id', meId).whereIn('addressee_id', otherIds)).orWhere((s) =>
+      s.whereIn('requester_id', otherIds).where('addressee_id', meId)
     )
   })
 
@@ -134,10 +134,8 @@ async function computeDirectFriendshipStatus(
       continue
     }
     const isFriend = row.status === 'accepted'
-    const friendRequestSent =
-      row.status === 'pending' && row.requesterId === meId
-    const friendRequestReceived =
-      row.status === 'pending' && row.addresseeId === meId
+    const friendRequestSent = row.status === 'pending' && row.requesterId === meId
+    const friendRequestReceived = row.status === 'pending' && row.addresseeId === meId
     out.set(p.convId, {
       isFriend,
       friendRequestSent,
@@ -225,10 +223,7 @@ export default class ConversationsController {
     }
 
     const conv = await db.transaction(async (trx) => {
-      const c = await Conversation.create(
-        { type: 'direct', createdBy: me.id },
-        { client: trx }
-      )
+      const c = await Conversation.create({ type: 'direct', createdBy: me.id }, { client: trx })
       await ConversationMember.createMany(
         [
           { conversationId: c.id, userId: me.id, role: 'member', joinedAt: DateTime.now() },
@@ -332,10 +327,7 @@ export default class ConversationsController {
       .orderBy('last_message_at', 'desc')
 
     const unreadMap = await computeUnreadCounts(me.id, ids)
-    const { blockedByMe, blockedByOther } = await computeDirectBlockStatus(
-      me.id,
-      convs
-    )
+    const { blockedByMe, blockedByOther } = await computeDirectBlockStatus(me.id, convs)
     const friendshipMap = await computeDirectFriendshipStatus(me.id, convs)
     const out = convs.map((c) => {
       const friendship = friendshipMap.get(c.id)
@@ -377,10 +369,7 @@ export default class ConversationsController {
       .firstOrFail()
 
     const unreadMap = await computeUnreadCounts(me.id, [conv.id])
-    const { blockedByMe, blockedByOther } = await computeDirectBlockStatus(
-      me.id,
-      [conv]
-    )
+    const { blockedByMe, blockedByOther } = await computeDirectBlockStatus(me.id, [conv])
     const friendshipMap = await computeDirectFriendshipStatus(me.id, [conv])
     const friendship = friendshipMap.get(conv.id)
     const out = {
@@ -438,9 +427,7 @@ export default class ConversationsController {
 
     // Return the UUIDs of the actually-added users, not numeric ids.
     const addedUsers =
-      toAdd.length === 0
-        ? []
-        : await User.query().whereIn('id', toAdd).select('id', 'uuid')
+      toAdd.length === 0 ? [] : await User.query().whereIn('id', toAdd).select('id', 'uuid')
     const addedUuids = addedUsers.map((u) => u.uuid)
 
     // Realtime: make every newly-added user join the conv room and
@@ -669,8 +656,7 @@ export default class ConversationsController {
       return ApiResponse.error(response, 403, 'Not a member of this conversation.')
     }
 
-    const { last_message_id: lastMessageUuid } =
-      await request.validateUsing(markReadValidator)
+    const { last_message_id: lastMessageUuid } = await request.validateUsing(markReadValidator)
 
     const now = DateTime.now()
     myMember.lastReadAt = now

@@ -16,8 +16,11 @@ export default class ReportsController {
    */
   public async create({ request, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const { target_type: targetType, target_id: targetUuid, reason } =
-      await request.validateUsing(createReportValidator)
+    const {
+      target_type: targetType,
+      target_id: targetUuid,
+      reason,
+    } = await request.validateUsing(createReportValidator)
 
     // Resolve public UUID → internal numeric id for the right table.
     let targetId: number | null = null
@@ -50,9 +53,7 @@ export default class ReportsController {
    */
   public async mine({ response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const reports = await Report.query()
-      .where('reporter_id', me.id)
-      .orderBy('id', 'desc')
+    const reports = await Report.query().where('reporter_id', me.id).orderBy('id', 'desc')
     return ApiResponse.ok(response, 'OK', { reports })
   }
 }

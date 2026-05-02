@@ -167,11 +167,13 @@ Tất cả endpoint đều prefix `/api/v1`.
 Mọi endpoint trả về 1 trong 2 shape sau (chi tiết: [.claude/CLAUDE.md](.claude/CLAUDE.md)):
 
 **Success**
+
 ```json
 { "success": true, "message": "...", "data": { ... } }
 ```
 
 **Error / Validation**
+
 ```json
 {
   "success": false,
@@ -202,6 +204,7 @@ socket.on('message:reaction:removed', (payload) => { ... })
 ```
 
 Khi connect, server tự động join các room:
+
 - `user:{userId}` — kênh riêng của user
 - `conv:{conversationId}` — cho mọi conversation user là thành viên
 
@@ -251,13 +254,13 @@ start/
 
 ## 11. Tích hợp ngoài (chưa enable mặc định)
 
-| Tính năng       | Cần                                  | Trạng thái khi thiếu                          |
-| --------------- | ------------------------------------ | --------------------------------------------- |
-| FCM Push        | `FIREBASE_*` env                     | Log payload, không gửi push                   |
-| AI Chatbot      | `GEMINI_API_KEY`                     | `/ai/*` trả 503                               |
-| SMS OTP         | (Chưa implement) Twilio / AWS SNS    | Chỉ có Email OTP                              |
-| Cloud storage   | (Chưa implement) Cloudinary / S3     | File lưu local `public/uploads/`              |
-| CI/CD deploy    | GitHub Actions + cloud credentials   | Chưa cấu hình                                 |
+| Tính năng     | Cần                                | Trạng thái khi thiếu             |
+| ------------- | ---------------------------------- | -------------------------------- |
+| FCM Push      | `FIREBASE_*` env                   | Log payload, không gửi push      |
+| AI Chatbot    | `GEMINI_API_KEY`                   | `/ai/*` trả 503                  |
+| SMS OTP       | (Chưa implement) Twilio / AWS SNS  | Chỉ có Email OTP                 |
+| Cloud storage | (Chưa implement) Cloudinary / S3   | File lưu local `public/uploads/` |
+| CI/CD deploy  | GitHub Actions + cloud credentials | Chưa cấu hình                    |
 
 ---
 
