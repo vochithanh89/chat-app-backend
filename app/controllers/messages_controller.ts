@@ -1,10 +1,12 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import app from '@adonisjs/core/services/app'
+import { DateTime } from 'luxon'
 import Conversation from '#models/conversation'
 import Message from '#models/message'
 import MessageAttachment, { type AttachmentType } from '#models/message_attachment'
 import MessageReaction from '#models/message_reaction'
 import MessageDeletion from '#models/message_deletion'
+import MessageStar from '#models/message_star'
 import { ApiResponse } from '#utils/api_response'
 import {
   sendMessageValidator,
@@ -280,5 +282,157 @@ export default class MessagesController {
       emoji: params.emoji,
     })
     return ApiResponse.ok(response, 'Reaction removed.', null)
+  }
+
+  /**
+   * @pin
+   * @operationId pinMessage
+   * @description Pins a message in a conversation. Owner or admin only for groups; any member for direct.
+   * @paramPath id - Message ID.
+   * @responseBody 200 - {"success": true, "message": "string", "data": {"message": "object"}}
+   */
+  public async pin({ params, response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const message = await resolveMessageByUuid(params.id)
+    if (!message) return ApiResponse.error(response, 404, 'Message not found.')
+    const member = await messageService.assertMember(message.conversationId, me.id)
+    if (!member) return ApiResponse.error(response, 403, 'Not a member.')
+
+    message.isPinned = true
+    message.pinnedBy = me.id
+    message.pinnedAt = DateTime.now()
+    await message.save()
+
+    await message.load((l) => l.load('sender').load('attachments').load('reactions'))
+    const serialized = await messageService.serialize(message, me.id)
+    realtime.emitToConversation(message.conversationId, 'message:pinned', serialized)
+
+    return ApiResponse.ok(response, 'Message pinned.', { message: serialized })
+  }
+
+  /**
+   * @unpin
+   * @operationId unpinMessage
+   * @description Unpins a message.
+   * @paramPath id - Message ID.
+   * @responseBody 200 - {"success": true, "message": "string", "data": {}}
+   */
+  public async unpin({ params, response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const message = await resolveMessageByUuid(params.id)
+    if (!message) return ApiResponse.error(response, 404, 'Message not found.')
+    const member = await messageService.assertMember(message.conversationId, me.id)
+    if (!member) return ApiResponse.error(response, 403, 'Not a member.')
+
+    message.isPinned = false
+    message.pinnedBy = null
+    message.pinnedAt = null
+    await message.save()
+
+    realtime.emitToConversation(message.conversationId, 'message:unpinned', {
+      messageId: message.uuid,
+    })
+    return ApiResponse.ok(response, 'Message unpinned.', null)
+  }
+
+  /**
+   * @star
+   * @operationId starMessage
+   * @description Bookmarks (stars) a message for the current user.
+   * @paramPath id - Message ID.
+   * @responseBody 200 - {"success": true, "message": "string", "data": {}}
+   */
+  public async star({ params, response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const message = await resolveMessageByUuid(params.id)
+    if (!message) return ApiResponse.error(response, 404, 'Message not found.')
+    const member = await messageService.assertMember(message.conversationId, me.id)
+    if (!member) return ApiResponse.error(response, 403, 'Not a member.')
+
+    await MessageStar.firstOrCreate({ messageId: message.id, userId: me.id })
+    return ApiResponse.ok(response, 'Message starred.', null)
+  }
+
+  /**
+   * @unstar
+   * @operationId unstarMessage
+   * @description Removes a star/bookmark from a message.
+   * @paramPath id - Message ID.
+   * @responseBody 200 - {"success": true, "message": "string", "data": {}}
+   */
+  public async unstar({ params, response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const message = await resolveMessageByUuid(params.id)
+    if (!message) return ApiResponse.error(response, 404, 'Message not found.')
+
+    await MessageStar.query()
+      .where('message_id', message.id)
+      .andWhere('user_id', me.id)
+      .delete()
+    return ApiResponse.ok(response, 'Message unstarred.', null)
+  }
+
+  /**
+   * @listStarred
+   * @operationId listStarredMessages
+   * @description Lists all messages starred by the current user.
+   * @responseBody 200 - {"success": true, "message": "string", "data": {"messages": "array"}}
+   */
+  public async listStarred({ response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const stars = await MessageStar.query()
+      .where('user_id', me.id)
+      .preload('message', (q) =>
+        q.preload('sender').preload('attachments').preload('reactions')
+      )
+      .orderBy('created_at', 'desc')
+      .limit(50)
+
+    const messages = await Promise.all(
+      stars
+        .filter((s) => s.message)
+        .map((s) => messageService.serialize(s.message, me.id))
+    )
+    return ApiResponse.ok(response, 'OK', { messages })
+  }
+
+  /**
+   * @detail
+   * @operationId getMessageDetail
+   * @description Returns full detail of a message: sender, reactions with user info, read receipts.
+   * @paramPath id - Message ID.
+   * @responseBody 200 - {"success": true, "message": "string", "data": {"message": "object", "readers": "array"}}
+   */
+  public async detail({ params, response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const message = await Message.query()
+      .where('uuid', params.id)
+      .preload('sender')
+      .preload('attachments')
+      .preload('reactions', (q) => q.preload('user' as any))
+      .first()
+    if (!message) return ApiResponse.error(response, 404, 'Message not found.')
+    const member = await messageService.assertMember(message.conversationId, me.id)
+    if (!member) return ApiResponse.error(response, 403, 'Not a member.')
+
+    // Who has read up to this message
+    const { default: ConversationMember } = await import('#models/conversation_member')
+    const members = await ConversationMember.query()
+      .where('conversation_id', message.conversationId)
+      .preload('user')
+    const readers = members
+      .filter((m) => {
+        if (!m.lastReadAt) return false
+        return m.lastReadAt >= message.createdAt
+      })
+      .map((m) => ({
+        id: m.user?.uuid,
+        name: m.user?.name,
+        avatarUrl: m.user?.avatarUrl,
+        readAt: m.lastReadAt,
+      }))
+
+    const serialized = await messageService.serialize(message, me.id)
+    return ApiResponse.ok(response, 'OK', { message: serialized, readers })
   }
 }

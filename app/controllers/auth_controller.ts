@@ -14,6 +14,7 @@ import db from '@adonisjs/lucid/services/db'
 import hash from '@adonisjs/core/services/hash'
 import { randomBytes } from 'node:crypto'
 import { ApiResponse } from '#utils/api_response'
+import realtimeService from '#services/realtime_service'
 
 function generateOtp(): string {
   return Math.floor(100000 + Math.random() * 900000).toString()
@@ -41,6 +42,13 @@ export default class AuthController {
     user.isOnline = true
     user.lastSeenAt = DateTime.now()
     await user.save()
+
+    // Kick all existing sessions of this user — single session enforcement.
+    // Emit BEFORE returning the new token so old tabs receive the event
+    // while their socket is still connected.
+    realtimeService.emitToUser(user.id, 'auth:session_replaced', {
+      message: 'Tài khoản của bạn đã đăng nhập ở thiết bị khác.',
+    })
 
     return ApiResponse.ok(response, 'Login successful.', {
       token: (tokens as any).token,

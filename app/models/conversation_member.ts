@@ -26,6 +26,15 @@ export default class ConversationMember extends BaseModel {
   @column.dateTime()
   declare lastReadAt: DateTime | null
 
+  @column()
+  declare isMuted: boolean
+
+  @column()
+  declare isPinned: boolean
+
+  @column()
+  declare pinOrder: number | null
+
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
 

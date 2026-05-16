@@ -130,6 +130,12 @@ router
         router
           .put('/conversations/:id/avatar', [ConversationsController, 'updateAvatar'])
           .as('conversations.updateAvatar')
+        router
+          .post('/conversations/:id/mute', [ConversationsController, 'toggleMute'])
+          .as('conversations.toggleMute')
+        router
+          .post('/conversations/:id/pin', [ConversationsController, 'togglePin'])
+          .as('conversations.togglePin')
 
         // Messages
         router
@@ -150,6 +156,12 @@ router
         router
           .delete('/messages/:id/reactions/:emoji', [MessagesController, 'unreact'])
           .as('messages.unreact')
+        router.post('/messages/:id/pin', [MessagesController, 'pin']).as('messages.pin')
+        router.delete('/messages/:id/pin', [MessagesController, 'unpin']).as('messages.unpin')
+        router.post('/messages/:id/star', [MessagesController, 'star']).as('messages.star')
+        router.delete('/messages/:id/star', [MessagesController, 'unstar']).as('messages.unstar')
+        router.get('/messages/starred', [MessagesController, 'listStarred']).as('messages.starred')
+        router.get('/messages/:id/detail', [MessagesController, 'detail']).as('messages.detail')
 
         // AI Chatbot
         router

@@ -97,7 +97,14 @@ export default class AiController {
     try {
       reply = await chatbot.generateReply(conversationId, content)
     } catch (err: any) {
-      return ApiResponse.error(response, err.status ?? 500, err.message ?? 'AI failed.')
+      const status = err.status ?? 500
+      let message = err.message ?? 'AI failed.'
+      if (status === 429) {
+        message = 'AI đang quá tải, vui lòng thử lại sau vài phút.'
+      } else if (status === 503) {
+        message = 'AI tạm thời không khả dụng, vui lòng thử lại sau.'
+      }
+      return ApiResponse.error(response, status, message)
     }
 
     const aiMessage = await messageService.createMessage({

@@ -43,6 +43,7 @@ class ChatbotService {
   /**
    * Builds the chat history (oldest → newest) from the conversation, then
    * sends it to Gemini and returns the model reply.
+   * On 429 errors, automatically reduces history size to avoid overload.
    */
   async generateReply(conversationId: number, currentUserContent: string): Promise<string> {
     const apiKey = env.get('GEMINI_API_KEY')
@@ -51,6 +52,12 @@ class ChatbotService {
     const model = env.get('GEMINI_MODEL') || 'gemini-1.5-flash'
     const bot = await this.getBotUser()
 
+    // Retry configuration with progressive history reduction
+    const MAX_RETRIES = 3
+    const INITIAL_DELAY_MS = 2000
+    const BACKOFF_MULTIPLIER = 2
+    
+    // Load full history once
     const recent = await Message.query()
       .where('conversation_id', conversationId)
       .andWhere('is_recalled', false)
@@ -58,48 +65,102 @@ class ChatbotService {
       .limit(HISTORY_LIMIT)
     recent.reverse()
 
-    const turns: AiTurn[] = recent
+    const allTurns: AiTurn[] = recent
       .filter((m) => m.content)
       .map((m) => ({
         role: m.senderId === bot.id ? 'model' : 'user',
         content: m.content!,
       }))
-    // Ensure the very latest user message is included even if it raced the query.
-    if (turns.length === 0 || turns[turns.length - 1].content !== currentUserContent) {
-      turns.push({ role: 'user', content: currentUserContent })
+    
+    // Ensure the very latest user message is included
+    if (allTurns.length === 0 || allTurns[allTurns.length - 1].content !== currentUserContent) {
+      allTurns.push({ role: 'user', content: currentUserContent })
     }
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
       model
     )}:generateContent?key=${encodeURIComponent(apiKey)}`
 
-    const body = {
-      contents: turns.map((t) => ({
-        role: t.role,
-        parts: [{ text: t.content }],
-      })),
-    }
+    // Retry loop with progressive history reduction on 429
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      // Reduce history size on each retry: 20 -> 10 -> 5 -> 2
+      let historyLimit = HISTORY_LIMIT
+      if (attempt === 2) historyLimit = 10
+      if (attempt === 3) historyLimit = 5
+      if (attempt > 3) historyLimit = 2
+      
+      // Take only the most recent messages (keep current user message)
+      const turns = allTurns.slice(-historyLimit)
+      
+      const body = {
+        contents: turns.map((t) => ({
+          role: t.role,
+          parts: [{ text: t.content }],
+        })),
+      }
 
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        const text = await res.text()
-        logger.error({ status: res.status, text }, 'Gemini API error')
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        
+        if (!res.ok) {
+          const text = await res.text()
+          logger.error({ status: res.status, text, attempt, historyLimit }, 'Gemini API error')
+          
+          // Handle 429 and 503 with retry and history reduction
+          if (res.status === 429 || res.status === 503) {
+            if (attempt < MAX_RETRIES) {
+              const delay = INITIAL_DELAY_MS * (BACKOFF_MULTIPLIER ** (attempt - 1))
+              const errorType = res.status === 429 ? 'rate limit' : 'high demand'
+              logger.info({ attempt, delay, nextHistoryLimit: attempt === 1 ? 10 : (attempt === 2 ? 5 : 2) }, 
+                `Retrying after ${res.status} error (${errorType}) with reduced history`)
+              await new Promise(resolve => setTimeout(resolve, delay))
+              continue // Retry with reduced history
+            }
+            // All retries exhausted
+            const message = res.status === 429 
+              ? 'AI đang quá tải, vui lòng thử lại sau vài phút.'
+              : 'AI tạm thời không khả dụng do nhu cầu cao, vui lòng thử lại sau.'
+            throw Object.assign(new Error(message), { status: res.status })
+          }
+          
+          // Other errors: throw immediately without retry
+          throw Object.assign(new Error('AI provider error.'), { status: 502 })
+        }
+        
+        const data = (await res.json()) as any
+        const reply: string =
+          data?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? '').join('') ?? ''
+        
+        if (attempt > 1) {
+          logger.info({ attempt, historyLimit }, 'Successfully generated reply after retry with reduced history')
+        }
+        
+        return reply.trim() || '...'
+      } catch (err: any) {
+        // If error has status, it's already formatted - rethrow
+        if (err.status) {
+          // For 429, only rethrow if we've exhausted retries
+          if (err.status === 429 && attempt < MAX_RETRIES) {
+            const delay = INITIAL_DELAY_MS * (BACKOFF_MULTIPLIER ** (attempt - 1))
+            logger.info({ attempt, delay, nextHistoryLimit: attempt === 1 ? 10 : (attempt === 2 ? 5 : 2) }, 
+              'Retrying after 429 error with reduced history')
+            await new Promise(resolve => setTimeout(resolve, delay))
+            continue // Retry with reduced history
+          }
+          throw err
+        }
+        // Network or other errors
+        logger.error({ err, attempt }, 'Gemini call failed')
         throw Object.assign(new Error('AI provider error.'), { status: 502 })
       }
-      const data = (await res.json()) as any
-      const reply: string =
-        data?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? '').join('') ?? ''
-      return reply.trim() || '...'
-    } catch (err: any) {
-      if (err.status) throw err
-      logger.error({ err }, 'Gemini call failed')
-      throw Object.assign(new Error('AI provider error.'), { status: 502 })
     }
+
+    // Should never reach here, but TypeScript needs it
+    throw Object.assign(new Error('AI provider error.'), { status: 502 })
   }
 }
 
