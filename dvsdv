@@ -1,0 +1,80 @@
+[33mcommit 7594e45aa4ec7b7f44b12f3804ec459c1fb920f2[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mquangvinh[m[33m)[m
+Author: Le Nguyen Quang Vinh <quangvinh7137@gmail.com>
+Date:   Wed Apr 22 04:42:54 2026 +0700
+
+    feat(realtime): Add WebRTC signaling for 1-on-1 and group calls
+    
+    - Implements socket handlers for 1-on-1 call signaling (call:request, call:answer, etc.).
+    - Adds broadcast relay handlers for group call events (group-call:ring, join, signal, leave).
+    - Updates API documentation for all new WebRTC socket events.
+    - Fixes OpenAPI schema definitions in swagger.ts to resolve doc generation errors.
+
+[33mcommit c955ace664ff23106398239fbb1111baf8b39f3e[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m)[m
+Author: thanhvo-bereadytechnology <thanh.vo@bereadytechnology.com.au>
+Date:   Sun Apr 12 12:17:49 2026 +0700
+
+    feat: add group avatar update functionality and enhance message handling with UUIDs
+
+[33mcommit 4361fdb138207f28aede314b9551a66009a64431[m
+Author: thanhvo-bereadytechnology <thanh.vo@bereadytechnology.com.au>
+Date:   Sat Apr 11 14:08:50 2026 +0700
+
+    feat: enhance conversation and message handling with read receipts and block status
+
+[33mcommit 0685350cbc01b2d8780177b9e7c087043ff902dd[m
+Author: thanhvo-bereadytechnology <thanh.vo@bereadytechnology.com.au>
+Date:   Sat Apr 11 13:05:56 2026 +0700
+
+    feat: implement user blocking functionality and enhance user management routes
+
+[33mcommit 3cbc3efeab98fb03524d61d9aadcf3c9ccd33ad0[m
+Author: thanhvo-bereadytechnology <thanh.vo@bereadytechnology.com.au>
+Date:   Wed Apr 8 19:09:07 2026 +0700
+
+    feat: enhance authentication flow and update Swagger configuration for security schemes
+
+[33mcommit f794f466ef493a5392013c99ce5642dc5bc46d9c[m
+Author: thanhvo-bereadytechnology <thanh.vo@bereadytechnology.com.au>
+Date:   Wed Apr 8 18:53:19 2026 +0700
+
+    feat: add real-time capabilities and enhance API routes
+    
+    - Introduced RealtimeProvider for handling real-time connections.
+    - Updated package.json to include new dependencies for Firebase and Socket.io.
+    - Added new routes for friends, conversations, messages, AI chatbot, and reports.
+    - Enhanced authentication routes with additional functionalities like OTP resend and user heartbeat.
+    - Implemented middleware for tracking user presence and admin functionalities.
+    - Created .gitkeep files for uploads directory structure.
+    - Updated environment configuration to include Firebase and AI chatbot settings.
+
+[33mcommit 49c290349919fdaa7710d1479285f7f03d55b0ba[m
+Author: thanhvo-bereadytechnology <thanh.vo@bereadytechnology.com.au>
+Date:   Sun Jan 18 14:58:35 2026 +0700
+
+    feat: implement password reset functionality and user management routes
+
+[33mcommit 2e876ef6190e382bc4d49cc5ea6bcd06b10e7af9[m
+Author: thanhvo-bereadytechnology <thanh.vo@bereadytechnology.com.au>
+Date:   Sun Jan 18 14:47:06 2026 +0700
+
+    refactor: update AuthController methods and enhance route definitions
+
+[33mcommit 9422c9301b55e335ad760ca49639684181316720[m
+Author: thanhvo-bereadytechnology <thanh.vo@bereadytechnology.com.au>
+Date:   Sun Jan 18 14:41:12 2026 +0700
+
+    feat: add Swagger configuration and routes for API documentation
+    
+    - Created a new Swagger configuration file for AdonisJS v6.
+    - Updated users migration to change 'full_name' to 'name'.
+    - Added adonis-autoswagger dependency to package.json and package-lock.json.
+    - Modified environment variables to include SMTP credentials and commented out Mailgun keys.
+    - Updated kernel to include email verification middleware.
+    - Implemented Swagger routes to serve API documentation in YAML and UI format.
+    - Refactored authentication routes to use a structured API versioning approach.
+
+[33mcommit 99c85b3b697e1858725e6e32799d640de7d32bfe[m
+Author: thanhvo-bereadytechnology <thanh.vo@bereadytechnology.com.au>
+Date:   Sun Jan 18 13:45:39 2026 +0700
+
+    init auth

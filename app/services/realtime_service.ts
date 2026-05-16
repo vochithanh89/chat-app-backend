@@ -166,6 +166,7 @@ class RealtimeService {
       socket.on('group-call:join', groupCallRelay('group-call:join'))
       socket.on('group-call:signal', groupCallRelay('group-call:signal'))
       socket.on('group-call:leave', groupCallRelay('group-call:leave'))
+      socket.on('call:camera-toggle', groupCallRelay('call:camera-toggle'))
 
       // --- Room Setup ---
       socket.join(`user:${userId}`)
