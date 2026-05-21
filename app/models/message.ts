@@ -6,6 +6,7 @@ import User from '#models/user'
 import Conversation from '#models/conversation'
 import MessageAttachment from '#models/message_attachment'
 import MessageReaction from '#models/message_reaction'
+import MessageStar from '#models/message_star'
 
 export default class Message extends BaseModel {
   @column({ isPrimary: true, serializeAs: null })
@@ -32,6 +33,15 @@ export default class Message extends BaseModel {
   @column()
   declare isRecalled: boolean
 
+  @column()
+  declare isPinned: boolean
+
+  @column({ serializeAs: null })
+  declare pinnedBy: number | null
+
+  @column.dateTime()
+  declare pinnedAt: DateTime | null
+
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
 
@@ -52,6 +62,9 @@ export default class Message extends BaseModel {
 
   @hasMany(() => MessageReaction)
   declare reactions: HasMany<typeof MessageReaction>
+
+  @hasMany(() => MessageStar)
+  declare stars: HasMany<typeof MessageStar>
 
   @beforeCreate()
   static assignUuid(message: Message) {
