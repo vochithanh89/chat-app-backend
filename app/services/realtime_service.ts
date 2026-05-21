@@ -12,6 +12,8 @@ interface AuthedSocket extends Socket {
   data: {
     userId: number
     userUuid?: string
+    /** Device type: 'web' | 'mobile' — sent by the client in handshake auth */
+    deviceType?: string
     /** Map public conversation UUID → internal numeric id. Populated
      *  on connect so transient events like typing indicators can
      *  resolve the target room without hitting the DB. */
@@ -45,22 +47,44 @@ class RealtimeService {
         const token =
           socket.handshake.auth?.token ??
           (socket.handshake.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
-        if (!token) return next(new Error('Missing token'))
+          
+        if (!token) {
+          (socket as AuthedSocket).data = { userId: 0 }
+          return next()
+        }
 
         const secret = env.get('JWT_SECRET') || env.get('APP_KEY')
         const payload = jwt.verify(token, secret) as any
         const userId = Number(payload?.userId ?? payload?.sub ?? payload?.id)
-        if (!userId) return next(new Error('Invalid token payload'))
-        ;(socket as AuthedSocket).data.userId = userId
+        if (!userId) {
+          (socket as AuthedSocket).data = { userId: 0 }
+          return next()
+        }
+        ;(socket as AuthedSocket).data = { userId }
+        // Capture device type from handshake auth (sent by client)
+        ;(socket as AuthedSocket).data.deviceType = socket.handshake.auth?.device_type || undefined
         next()
       } catch (err) {
-        next(new Error('Unauthorized'))
+        // If token fails verification, allow connection but mark unauthenticated
+        (socket as AuthedSocket).data = { userId: 0 }
+        next()
       }
     })
 
     this.io.on('connection', async (socket) => {
       const authedSocket = socket as AuthedSocket
-      const userId = authedSocket.data.userId
+      const userId = authedSocket.data?.userId
+
+      // Both authenticated and unauthenticated sockets can join QR rooms
+      socket.on('qr:join', (sessionId: string) => {
+        socket.join(`qr:${sessionId}`)
+      })
+
+      if (!userId) {
+        logger.info({ socketId: socket.id }, 'unauthenticated socket connected')
+        return
+      }
+
       logger.info({ userId, socketId: socket.id }, 'socket connected')
 
       socket.on('disconnect', (reason) => {
@@ -84,6 +108,13 @@ class RealtimeService {
       this.connections.set(userId, prevCount + 1)
       if (prevCount === 0) {
         void this.markOnline(userId, true)
+      }
+
+      // Tag this socket with a device-type room so we can target events
+      // to only web or only mobile sockets of a given user.
+      const deviceType = authedSocket.data.deviceType
+      if (deviceType) {
+        socket.join(`user:${userId}:${deviceType}`)
       }
 
       socket.on('conversation:join', (conversationId: number) => {
@@ -203,6 +234,15 @@ class RealtimeService {
   emitToUser(userId: number | string, event: string, payload: unknown): void {
     if (!this.io) return
     this.io.to(`user:${userId}`).emit(event, payload)
+  }
+
+  /**
+   * Emit an event to only sockets of a specific device type for a user.
+   * deviceType should be 'web' or 'mobile'.
+   */
+  emitToUserDeviceType(userId: number, deviceType: string, event: string, payload: unknown): void {
+    if (!this.io) return
+    this.io.to(`user:${userId}:${deviceType}`).emit(event, payload)
   }
 
   async joinUserToConversation(userId: number, conversation: Conversation): Promise<void> {
