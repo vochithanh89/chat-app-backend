@@ -53,6 +53,9 @@ export default class User extends compose(BaseModel, AuthFinder) {
   @column()
   declare bio: string | null
 
+  @column.dateTime({ columnName: 'accepted_terms_at' })
+  declare acceptedTermsAt: DateTime | null
+
   @column()
   declare isOnline: boolean
 

@@ -19,5 +19,10 @@ export const userRegistrationValidator = vine.compile(
       }),
     password: vine.string().minLength(8).confirmed(),
     name: vine.string().optional(),
+    // Must accept terms explicitly
+    accepted_terms: vine.literal(true),
+    // Optional device token sent during mobile registration
+    device_token: vine.string().optional(),
+    device_platform: vine.enum(['android', 'ios', 'web'] as const).optional(),
   })
 )

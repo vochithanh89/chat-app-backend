@@ -1,4 +1,5 @@
 import User from '#models/user'
+import DeviceToken from '#models/device_token'
 import { HttpContext } from '@adonisjs/core/http'
 import mail from '@adonisjs/mail/services/main'
 import VerifyEmailNotification from '#mails/verify_email_notification'
@@ -31,24 +32,61 @@ export default class AuthController {
    * @responseBody 422 - {"success": false, "message": "Validation failed.", "errors": [{"field": "string", "message": "string"}]}
    */
   public async login({ request, response, auth }: HttpContext) {
-    const { email, password } = await request.validateUsing(userLoginValidator)
+    const { email, password, device_type: deviceType } = await request.validateUsing(
+      userLoginValidator
+    )
     const user = await User.verifyCredentials(email, password)
     if (user.accountStatus === 'locked') {
       return ApiResponse.error(response, 403, 'Your account has been locked. Contact support.')
     }
+    // Determine the device category for session management.
+    // mobile_android and mobile_ios are both treated as 'mobile' — only 1 web + 1 mobile allowed.
+    const deviceCategory = deviceType
+      ? deviceType === 'web' ? 'web' : 'mobile'
+      : undefined
+
+    // Revoke any existing refresh tokens for the same device category (single session per category)
+    if (deviceCategory) {
+      const allRefresh = await User.refreshTokens.all(user)
+      for (const t of allRefresh) {
+        const tokenName = (t as any).name as string | undefined
+        const tokenCategory = tokenName
+          ? tokenName === 'web' ? 'web' : 'mobile'
+          : undefined
+        if (tokenCategory === deviceCategory) {
+          await User.refreshTokens.delete(user, (t as any).identifier)
+        }
+      }
+    }
+
     const tokens = await auth.use('jwt').generate(user)
-    const refreshTokenRow = await User.refreshTokens.create(user)
+    // Create refresh token and tag it with device type (if provided)
+    const refreshTokenRow = await User.refreshTokens.create(user, { name: deviceType })
 
     user.isOnline = true
     user.lastSeenAt = DateTime.now()
     await user.save()
 
-    // Kick all existing sessions of this user — single session enforcement.
-    // Emit BEFORE returning the new token so old tabs receive the event
-    // while their socket is still connected.
-    realtimeService.emitToUser(user.id, 'auth:session_replaced', {
-      message: 'Tài khoản của bạn đã đăng nhập ở thiết bị khác.',
-    })
+    // Notify only sessions of the SAME device category that they are being replaced.
+    // This allows 1 web + 1 mobile session to coexist (max 2 different device types).
+    if (deviceCategory) {
+      // Emit to all mobile sub-types when a mobile device logs in
+      if (deviceCategory === 'mobile') {
+        realtimeService.emitToUserDeviceType(user.id, 'mobile_android', 'auth:session_replaced', {
+          device_type: deviceType,
+          message: 'Tài khoản của bạn đã đăng nhập ở thiết bị di động khác. Bạn sẽ bị đăng xuất.',
+        })
+        realtimeService.emitToUserDeviceType(user.id, 'mobile_ios', 'auth:session_replaced', {
+          device_type: deviceType,
+          message: 'Tài khoản của bạn đã đăng nhập ở thiết bị di động khác. Bạn sẽ bị đăng xuất.',
+        })
+      } else {
+        realtimeService.emitToUserDeviceType(user.id, deviceCategory, 'auth:session_replaced', {
+          device_type: deviceType,
+          message: 'Tài khoản của bạn đã đăng nhập ở thiết bị web khác. Bạn sẽ bị đăng xuất.',
+        })
+      }
+    }
 
     return ApiResponse.ok(response, 'Login successful.', {
       token: (tokens as any).token,
@@ -111,10 +149,32 @@ export default class AuthController {
     const payload = await request.validateUsing(userRegistrationValidator)
     const otp = generateOtp()
 
-    const user = await User.create({
+    const userPayload: any = {
       ...payload,
       verificationToken: otp,
-    })
+    }
+    // Record accepted terms timestamp when explicitly accepted
+    if ((payload as any).accepted_terms) {
+      userPayload.acceptedTermsAt = DateTime.now()
+    }
+    
+    // Remove non-model properties before DB insertion
+    delete userPayload.accepted_terms
+
+    const user = await User.create(userPayload)
+
+    // If registration comes from mobile with a device token, store it
+    if (payload.device_token && payload.device_platform) {
+      try {
+        await DeviceToken.create({
+          userId: user.id,
+          token: payload.device_token,
+          platform: payload.device_platform,
+        })
+      } catch (e) {
+        // ignore duplicate device tokens or other device token errors
+      }
+    }
 
     await mail.send(new VerifyEmailNotification(user, otp))
 
@@ -123,6 +183,104 @@ export default class AuthController {
       'Registration successful. Please check your email for the verification code.',
       { user: user.serialize() }
     )
+  }
+
+  /**
+   * Generate a short-lived QR token for web login. Stored server-side and
+   * scanned by a mobile client to authenticate the web session.
+   */
+  public async generateQr({ request, response }: HttpContext) {
+    const qrToken = randomBytes(16).toString('hex')
+    const expiresAt = DateTime.now().plus({ minutes: 3 })
+
+    await db.table('qr_tokens').insert({
+      token: qrToken,
+      created_at: DateTime.now().toISO(),
+      expires_at: expiresAt.toISO(),
+    })
+
+    return ApiResponse.ok(response, 'QR token generated.', {
+      qr_token: qrToken,
+      expires_at: expiresAt.toISO(),
+    })
+  }
+
+  /**
+   * Mobile app (authenticated) scans the QR and links the qr_token to the
+   * currently authenticated user. The web client will poll status to obtain
+   * an access token once the QR has been scanned.
+   */
+  public async scanQr({ request, response, auth }: HttpContext) {
+    const qrToken = request.input('qr_token')
+    if (!qrToken) return ApiResponse.error(response, 422, 'qr_token is required.')
+
+    const user = auth.use('jwt').getUserOrFail()
+    const record = await db.from('qr_tokens').where('token', qrToken).first()
+    if (!record) return ApiResponse.error(response, 404, 'QR token not found or expired.')
+
+    if (DateTime.fromISO(record.expires_at) < DateTime.now()) {
+      await db.from('qr_tokens').where('token', qrToken).delete()
+      return ApiResponse.error(response, 400, 'QR token expired.')
+    }
+
+    await db.table('qr_tokens').where('token', qrToken).update({
+      user_id: user.id,
+      scanned_at: DateTime.now().toISO(),
+    })
+
+    return ApiResponse.ok(response, 'QR scanned and linked to your account.', null)
+  }
+
+  /**
+   * Web client polls to check if QR was scanned. When scanned, issue tokens
+   * for the linked user and delete the QR record.
+   */
+  public async qrStatus({ request, response, auth }: HttpContext) {
+    const qrToken = request.input('qr_token')
+    if (!qrToken) return ApiResponse.error(response, 422, 'qr_token is required.')
+
+    const record = await db.from('qr_tokens').where('token', qrToken).first()
+    if (!record) return ApiResponse.error(response, 404, 'QR token not found.')
+
+    if (DateTime.fromISO(record.expires_at) < DateTime.now()) {
+      await db.from('qr_tokens').where('token', qrToken).delete()
+      return ApiResponse.error(response, 400, 'QR token expired.')
+    }
+
+    if (!record.user_id) {
+      return ApiResponse.ok(response, 'Waiting for QR scan.', { status: 'pending' })
+    }
+
+    const user = await User.find(record.user_id)
+    if (!user) return ApiResponse.error(response, 404, 'User not found.')
+
+    // Issue tokens for the user (device type = web)
+    // Revoke existing web refresh tokens (single session per device category)
+    const allRefresh = await User.refreshTokens.all(user)
+    for (const t of allRefresh) {
+      const tokenName = (t as any).name as string | undefined
+      if (tokenName === 'web') {
+        await User.refreshTokens.delete(user, (t as any).identifier)
+      }
+    }
+
+    const tokens = await auth.use('jwt').generate(user)
+    const refreshTokenRow = await User.refreshTokens.create(user, { name: 'web' })
+
+    // Notify existing web sessions that they are being replaced
+    realtimeService.emitToUserDeviceType(user.id, 'web', 'auth:session_replaced', {
+      device_type: 'web',
+      message: 'Tài khoản của bạn đã đăng nhập ở thiết bị web khác qua mã QR. Bạn sẽ bị đăng xuất.',
+    })
+
+    // Remove the QR record once consumed
+    await db.from('qr_tokens').where('token', qrToken).delete()
+
+    return ApiResponse.ok(response, 'QR authenticated.', {
+      token: (tokens as any).token,
+      refreshToken: refreshTokenRow.value!.release(),
+      user: user.serialize(),
+    })
   }
 
   /**
@@ -247,6 +405,17 @@ export default class AuthController {
     await user.save()
     await db.from('password_reset_tokens').where('token', token).delete()
 
+    // Revoke all refresh tokens — force logout on all devices
+    const allTokens = await User.refreshTokens.all(user)
+    for (const t of allTokens) {
+      await User.refreshTokens.delete(user, (t as any).identifier)
+    }
+
+    // Notify clients that they must re-authenticate
+    realtimeService.emitToUser(user.id, 'auth:force_logout', {
+      message: 'Mật khẩu đã được thay đổi. Vui lòng đăng nhập lại.',
+    })
+
     return ApiResponse.ok(response, 'Password has been reset successfully.', null)
   }
 
@@ -259,7 +428,7 @@ export default class AuthController {
    * @responseBody 400 - {"success": false, "message": "Current password is incorrect.", "errors": []}
    */
   public async changePassword({ request, response, auth }: HttpContext) {
-    const { current_password: currentPassword, password } =
+    const { current_password: currentPassword, password, device_type: deviceType } =
       await request.validateUsing(changePasswordValidator)
 
     const user = auth.use('jwt').getUserOrFail()
@@ -270,6 +439,45 @@ export default class AuthController {
 
     user.password = password
     await user.save()
+
+    const deviceCategory = deviceType
+      ? deviceType === 'web' ? 'web' : 'mobile'
+      : undefined
+
+    const allTokens = await User.refreshTokens.all(user)
+
+    for (const t of allTokens) {
+      const tokenName = (t as any).name as string | undefined
+      const tokenCategory = tokenName
+        ? tokenName === 'web' ? 'web' : 'mobile'
+        : undefined
+
+      // If deviceCategory is provided, keep the token for the current category.
+      // Otherwise, revoke all tokens.
+      if (!deviceCategory || tokenCategory !== deviceCategory) {
+        await User.refreshTokens.delete(user, (t as any).identifier)
+      }
+    }
+
+    if (deviceCategory === 'web') {
+      // Current device is web, logout mobile
+      realtimeService.emitToUserDeviceType(user.id, 'mobile_android', 'auth:force_logout', {
+        message: 'Mật khẩu đã được thay đổi ở thiết bị khác. Vui lòng đăng nhập lại.',
+      })
+      realtimeService.emitToUserDeviceType(user.id, 'mobile_ios', 'auth:force_logout', {
+        message: 'Mật khẩu đã được thay đổi ở thiết bị khác. Vui lòng đăng nhập lại.',
+      })
+    } else if (deviceCategory === 'mobile') {
+      // Current device is mobile, logout web
+      realtimeService.emitToUserDeviceType(user.id, 'web', 'auth:force_logout', {
+        message: 'Mật khẩu đã được thay đổi ở thiết bị khác. Vui lòng đăng nhập lại.',
+      })
+    } else {
+      // No device category provided, logout all
+      realtimeService.emitToUser(user.id, 'auth:force_logout', {
+        message: 'Mật khẩu đã được thay đổi. Vui lòng đăng nhập lại.',
+      })
+    }
 
     return ApiResponse.ok(response, 'Password changed successfully.', null)
   }

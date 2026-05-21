@@ -1,5 +1,6 @@
 import User from '#models/user'
 import { BaseMail } from '@adonisjs/mail'
+import env from '#start/env'
 
 export default class ForgotPasswordNotification extends BaseMail {
   constructor(
@@ -17,8 +18,7 @@ export default class ForgotPasswordNotification extends BaseMail {
    * the email is sent or queued.
    */
   prepare() {
-    // Frontend URL, adjust as needed
-    const resetUrl = `http://localhost:3000/reset-password?token=${this.token}`
+    const resetUrl = `${env.get('FRONTEND_URL')}/reset-password?token=${this.token}`
 
     this.message.to(this.user.email).html(`
       <h1>Password Reset Request</h1>
