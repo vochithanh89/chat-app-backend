@@ -532,6 +532,41 @@ export default class ConversationsController {
   }
 
   /**
+   * @archive
+   * @operationId archiveConversation
+   * @description Archives (hides) the conversation for the current user by removing their membership row. Works for direct and group conversations.
+   * @paramPath id - Conversation ID.
+   */
+  public async archive({ params, response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const conv = await resolveByUuid(params.id)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
+
+    const member = await ConversationMember.query()
+      .where('conversation_id', conv.id)
+      .andWhere('user_id', me.id)
+      .first()
+    if (!member) return ApiResponse.error(response, 403, 'Not a member of this conversation.')
+
+    // Remove the membership so the conversation no longer appears in the user's sidebar.
+    await ConversationMember.query()
+      .where('conversation_id', conv.id)
+      .andWhere('user_id', me.id)
+      .delete()
+
+    // Realtime: notify this user's other tabs and make sockets leave the room.
+    realtimeService.emitToUser(me.id, 'conversation:removed', {
+      conversationId: conv.uuid,
+    })
+    await realtimeService.leaveUserFromConversation(me.id, conv.id)
+    realtimeService.emitToConversation(conv.id, 'conversation:members-changed', {
+      conversationId: conv.uuid,
+    })
+
+    return ApiResponse.ok(response, 'Conversation archived for user.', null)
+  }
+
+  /**
    * @updateMemberRole
    * @operationId updateMemberRole
    * @description Promotes/demotes a member to admin or member. Owner only.

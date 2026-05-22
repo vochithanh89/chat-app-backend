@@ -124,6 +124,9 @@ router
           .post('/conversations/:id/leave', [ConversationsController, 'leave'])
           .as('conversations.leave')
         router
+          .post('/conversations/:id/archive', [ConversationsController, 'archive'])
+          .as('conversations.archive')
+        router
           .put('/conversations/:id/members/:userId/role', [
             ConversationsController,
             'updateMemberRole',
@@ -178,6 +181,9 @@ router
         router
           .post('/ai/conversations', [AiController, 'startConversation'])
           .as('ai.startConversation')
+        router.post('/ai/conversations/new', [AiController, 'startNewConversation']).as(
+          'ai.startNewConversation'
+        )
         router.post('/ai/chat', [AiController, 'chat']).as('ai.chat')
 
         // Reports (user side)
