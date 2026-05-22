@@ -8,7 +8,10 @@ import { defineConfig } from '@adonisjs/cors'
  */
 const corsConfig = defineConfig({
   enabled: true,
-  origin: true,
+  origin: [
+    'http://localhost:5173', // Port mặc định khi chạy dưới máy local
+    'https://chat-app-web-frontend-ten.vercel.app', // 🌟 THÊM CHÍNH XÁC LINK VERCEL CỦA BẠN VÀO ĐÂY
+  ],
   methods: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
   headers: true,
   exposeHeaders: [],
