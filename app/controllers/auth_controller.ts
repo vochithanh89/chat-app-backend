@@ -32,10 +32,31 @@ export default class AuthController {
    * @responseBody 422 - {"success": false, "message": "Validation failed.", "errors": [{"field": "string", "message": "string"}]}
    */
   public async login({ request, response, auth }: HttpContext) {
-    const { email, password, device_type: deviceType } = await request.validateUsing(
+    const { email, identifier, password, device_type: deviceType } = await request.validateUsing(
       userLoginValidator
     )
-    const user = await User.verifyCredentials(email, password)
+
+    const loginIdentifier = (email || identifier || '').trim()
+    if (!loginIdentifier) {
+      return ApiResponse.error(response, 422, 'Email or identifier is required.')
+    }
+
+    let user
+    const loginEmail = loginIdentifier.includes('@') ? loginIdentifier.toLowerCase() : undefined
+
+    if (loginEmail) {
+      try {
+        user = await User.verifyCredentials(loginEmail, password)
+      } catch {
+        return ApiResponse.error(response, 401, 'Invalid credentials.')
+      }
+    } else {
+      user = await User.query().where('phone', loginIdentifier).first()
+      if (!user || !(await hash.verify(user.password, password))) {
+        return ApiResponse.error(response, 401, 'Invalid credentials.')
+      }
+    }
+
     if (user.accountStatus === 'locked') {
       return ApiResponse.error(response, 403, 'Your account has been locked. Contact support.')
     }
