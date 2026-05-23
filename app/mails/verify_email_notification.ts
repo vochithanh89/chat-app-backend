@@ -9,7 +9,7 @@ export default class VerifyEmailNotification extends BaseMail {
     super()
   }
 
-  from = 'info@example.com'
+  from = 'onboarding@resend.dev'
   subject = 'Verify Your Email Address'
 
   /**

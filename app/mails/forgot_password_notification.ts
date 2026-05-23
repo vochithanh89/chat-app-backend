@@ -10,7 +10,7 @@ export default class ForgotPasswordNotification extends BaseMail {
     super()
   }
 
-  from = 'info@example.com'
+  from = 'onboarding@resend.dev'
   subject = 'Reset Your Password'
 
   /**
