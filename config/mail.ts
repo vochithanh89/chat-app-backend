@@ -4,6 +4,10 @@ import { defineConfig, transports } from '@adonisjs/mail'
 const mailConfig = defineConfig({
   default: 'smtp',
 
+  from: {
+    address: 'onboarding@resend.dev', // 🌟 BẮT BUỘC phải điền chính xác chữ này
+    name: 'Chat App', // Tên hiển thị khi người dùng nhận được mail (bạn đặt tùy ý)
+  },
   /**
    * The mailers object can be used to configure multiple mailers
    * each using a different transport or same transport with different
