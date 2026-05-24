@@ -38,6 +38,7 @@ export const uploadAttachmentValidator = vine.compile(
         'wav',
         'm4a',
         'ogg',
+        'aac',
         'pdf',
         'doc',
         'docx',
@@ -47,6 +48,12 @@ export const uploadAttachmentValidator = vine.compile(
         'zip',
       ],
     }),
+    // For voice messages — caller may pass the recording duration so the
+    // UI can render the waveform/length without probing the file.
+    duration_ms: vine.number().positive().max(60 * 60 * 1000).optional(),
+    // Optional override when the file extension doesn't match (e.g. a
+    // browser-recorded audio/webm should still be classified as audio).
+    type: vine.enum(['image', 'video', 'audio', 'document'] as const).optional(),
   })
 )
 

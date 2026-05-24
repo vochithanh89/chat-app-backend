@@ -78,12 +78,13 @@ export default class MessagesController {
       .preload('sender')
       .preload('attachments')
       .preload('reactions')
+      .preload('poll')
       .orderBy('id', 'desc')
       .limit(limit)
 
     const messages = await query
     return ApiResponse.ok(response, 'OK', {
-      messages: await Promise.all(messages.map((m) => messageService.serialize(m))),
+      messages: await Promise.all(messages.map((m) => messageService.serialize(m, me.id))),
     })
   }
 
@@ -103,6 +104,21 @@ export default class MessagesController {
     const conversationId = conv.id
     const member = await messageService.assertMember(conversationId, me.id)
     if (!member) return ApiResponse.error(response, 403, 'Not a member.')
+
+    // Restricted groups: only owner/admin may send messages. Regular
+    // members are effectively read-only.
+    if (
+      conv.type === 'group' &&
+      conv.commentsRestricted &&
+      member.role !== 'owner' &&
+      member.role !== 'admin'
+    ) {
+      return ApiResponse.error(
+        response,
+        403,
+        'Only group owner or admin can send messages in this group.'
+      )
+    }
 
     const payload = await request.validateUsing(sendMessageValidator)
 
@@ -149,7 +165,8 @@ export default class MessagesController {
    */
   public async uploadAttachment({ request, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const { file } = await request.validateUsing(uploadAttachmentValidator)
+    const { file, duration_ms: durationMs, type: typeOverride } =
+      await request.validateUsing(uploadAttachmentValidator)
 
     const fileName = `${me.id}_${Date.now()}.${file.extname}`
     await file.move(app.makePath('public/uploads/messages'), { name: fileName, overwrite: true })
@@ -157,14 +174,21 @@ export default class MessagesController {
     const baseUrl = `${request.protocol()}://${request.host()}`
     const url = `${baseUrl}/uploads/messages/${fileName}`
 
+    // audio/webm from MediaRecorder lands here with .webm but should be
+    // treated as audio, not video — honor the caller-provided override.
+    const mimeType = file.headers['content-type'] ?? null
+    let resolvedType = typeOverride ?? detectAttachmentType(file.extname ?? '')
+    if (!typeOverride && mimeType?.startsWith('audio/')) resolvedType = 'audio'
+
     const attachment = await MessageAttachment.create({
       messageId: null,
       uploadedBy: me.id,
       url,
-      type: detectAttachmentType(file.extname ?? ''),
+      type: resolvedType,
       fileName: file.clientName,
-      mimeType: file.headers['content-type'] ?? null,
+      mimeType,
       fileSize: file.size,
+      durationMs: durationMs ?? null,
     })
 
     return ApiResponse.created(response, 'File uploaded.', { attachment })

@@ -33,6 +33,12 @@ export default class Conversation extends BaseModel {
   @column({ serializeAs: null })
   declare createdBy: number | null
 
+  @column()
+  declare commentsRestricted: boolean
+
+  @column()
+  declare inviteCode: string | null
+
   @column.dateTime()
   declare lastMessageAt: DateTime | null
 
@@ -57,4 +63,21 @@ export default class Conversation extends BaseModel {
       conversation.uuid = randomUUID()
     }
   }
+
+  @beforeCreate()
+  static assignInviteCode(conversation: Conversation) {
+    // Only groups get an invite code. Format: 8 uppercase alphanumerics.
+    if (conversation.type === 'group' && !conversation.inviteCode) {
+      conversation.inviteCode = generateInviteCode()
+    }
+  }
+}
+
+const INVITE_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+export function generateInviteCode(length = 8): string {
+  let out = ''
+  for (let i = 0; i < length; i++) {
+    out += INVITE_CODE_ALPHABET[Math.floor(Math.random() * INVITE_CODE_ALPHABET.length)]
+  }
+  return out
 }

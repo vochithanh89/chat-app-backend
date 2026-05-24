@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { DateTime } from 'luxon'
-import { BaseModel, beforeCreate, belongsTo, column, hasMany } from '@adonisjs/lucid/orm'
-import type { BelongsTo, HasMany } from '@adonisjs/lucid/types/relations'
+import { BaseModel, beforeCreate, belongsTo, column, hasMany, hasOne } from '@adonisjs/lucid/orm'
+import type { BelongsTo, HasMany, HasOne } from '@adonisjs/lucid/types/relations'
 import User from '#models/user'
 import Conversation from '#models/conversation'
 import MessageAttachment from '#models/message_attachment'
 import MessageReaction from '#models/message_reaction'
 import MessageStar from '#models/message_star'
+import Poll from '#models/poll'
 
 export default class Message extends BaseModel {
   @column({ isPrimary: true, serializeAs: null })
@@ -65,6 +66,9 @@ export default class Message extends BaseModel {
 
   @hasMany(() => MessageStar)
   declare stars: HasMany<typeof MessageStar>
+
+  @hasOne(() => Poll)
+  declare poll: HasOne<typeof Poll>
 
   @beforeCreate()
   static assignUuid(message: Message) {

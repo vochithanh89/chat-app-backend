@@ -11,6 +11,19 @@ export const createGroupConversationValidator = vine.compile(
   vine.object({
     name: vine.string().trim().minLength(1).maxLength(100),
     member_ids: vine.array(vine.string().uuid()).minLength(1).maxLength(200),
+    comments_restricted: vine.boolean().optional(),
+  })
+)
+
+export const updateGroupSettingsValidator = vine.compile(
+  vine.object({
+    comments_restricted: vine.boolean().optional(),
+  })
+)
+
+export const joinByCodeValidator = vine.compile(
+  vine.object({
+    code: vine.string().trim().minLength(4).maxLength(32),
   })
 )
 
