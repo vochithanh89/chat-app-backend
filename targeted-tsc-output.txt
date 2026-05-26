@@ -1,0 +1,87 @@
+﻿app/controllers/auth_controller.ts(1,18): error TS2307: Cannot find module '#models/user' or its corresponding type declarations.
+app/controllers/auth_controller.ts(2,25): error TS2307: Cannot find module '#models/device_token' or its corresponding type declarations.
+app/controllers/auth_controller.ts(3,29): error TS2307: Cannot find module '@adonisjs/core/http' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@adonisjs/core/build/modules/http/main.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+app/controllers/auth_controller.ts(4,18): error TS2307: Cannot find module '@adonisjs/mail/services/main' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@adonisjs/mail/build/services/main.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+app/controllers/auth_controller.ts(5,37): error TS2307: Cannot find module '#mails/verify_email_notification' or its corresponding type declarations.
+app/controllers/auth_controller.ts(6,40): error TS2307: Cannot find module '#mails/forgot_password_notification' or its corresponding type declarations.
+app/controllers/auth_controller.ts(8,43): error TS2307: Cannot find module '#validators/user_registration' or its corresponding type declarations.
+app/controllers/auth_controller.ts(9,36): error TS2307: Cannot find module '#validators/user_login' or its corresponding type declarations.
+app/controllers/auth_controller.ts(10,41): error TS2307: Cannot find module '#validators/forgot_password' or its corresponding type declarations.
+app/controllers/auth_controller.ts(11,40): error TS2307: Cannot find module '#validators/reset_password' or its corresponding type declarations.
+app/controllers/auth_controller.ts(12,58): error TS2307: Cannot find module '#validators/verify_email' or its corresponding type declarations.
+app/controllers/auth_controller.ts(13,41): error TS2307: Cannot find module '#validators/change_password' or its corresponding type declarations.
+app/controllers/auth_controller.ts(14,16): error TS2307: Cannot find module '@adonisjs/lucid/services/db' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@adonisjs/lucid/build/services/db.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+app/controllers/auth_controller.ts(15,18): error TS2307: Cannot find module '@adonisjs/core/services/hash' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@adonisjs/core/build/services/hash.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+app/controllers/auth_controller.ts(17,29): error TS2307: Cannot find module '#utils/api_response' or its corresponding type declarations.
+app/controllers/auth_controller.ts(18,29): error TS2307: Cannot find module '#services/realtime_service' or its corresponding type declarations.
+node_modules/@vinejs/vine/build/src/errors/validation_error.d.ts(16,42): error TS2304: Cannot find name 'ErrorOptions'.
+node_modules/@vinejs/vine/build/src/messages_provider/simple_messages_provider.d.ts(7,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@vinejs/vine/build/src/schema/array/main.d.ts(1,38): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/schema/array/main.d.ts(10,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@vinejs/vine/build/src/schema/base/literal.d.ts(2,45): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/schema/base/literal.d.ts(53,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@vinejs/vine/build/src/schema/base/literal.d.ts(71,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@vinejs/vine/build/src/schema/base/literal.d.ts(143,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@vinejs/vine/build/src/schema/base/main.d.ts(1,46): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/schema/base/main.d.ts(46,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@vinejs/vine/build/src/schema/base/main.d.ts(62,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@vinejs/vine/build/src/schema/enum/main.d.ts(9,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@vinejs/vine/build/src/schema/enum/native_enum.d.ts(12,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@vinejs/vine/build/src/schema/enum/native_enum.d.ts(18,55): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/schema/enum/native_enum.d.ts(20,55): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/schema/literal/main.d.ts(8,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@vinejs/vine/build/src/schema/object/conditional.d.ts(1,64): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/schema/object/conditional.d.ts(9,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@vinejs/vine/build/src/schema/object/group.d.ts(1,44): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/schema/object/group.d.ts(11,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@vinejs/vine/build/src/schema/object/main.d.ts(1,44): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/schema/object/main.d.ts(11,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@vinejs/vine/build/src/schema/object/main.d.ts(36,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@vinejs/vine/build/src/schema/record/main.d.ts(1,39): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/schema/record/main.d.ts(17,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@vinejs/vine/build/src/schema/record/main.d.ts(37,64): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/schema/record/main.d.ts(37,158): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/schema/record/rules.d.ts(1,30): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/schema/string/rules.d.ts(1,35): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/schema/tuple/main.d.ts(1,38): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/schema/tuple/main.d.ts(10,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@vinejs/vine/build/src/schema/union/conditional.d.ts(1,53): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/schema/union/conditional.d.ts(9,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@vinejs/vine/build/src/schema/union/main.d.ts(1,38): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/schema/union/main.d.ts(10,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@vinejs/vine/build/src/schema/union_of_types/main.d.ts(1,43): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/schema/union_of_types/main.d.ts(9,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@vinejs/vine/build/src/types.d.ts(1,13): error TS1259: Module '"L:/chat_app/chat-app-backend/node_modules/dayjs/index"' can only be default-imported using the 'esModuleInterop' flag
+node_modules/@vinejs/vine/build/src/types.d.ts(8,202): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/types.d.ts(70,97): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/vine/helpers.d.ts(75,29): error TS2339: Property 'default' does not exist on type '(str: string, options?: IsEmailOptions) => boolean'.
+node_modules/@vinejs/vine/build/src/vine/helpers.d.ts(76,25): error TS2339: Property 'default' does not exist on type '(str: string, options?: IsURLOptions) => boolean'.
+node_modules/@vinejs/vine/build/src/vine/helpers.d.ts(83,27): error TS2339: Property 'default' does not exist on type '(str: string, options?: IsIBANOptions) => boolean'.
+node_modules/@vinejs/vine/build/src/vine/main.d.ts(61,51): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/vine/validator.d.ts(1,62): error TS2307: Cannot find module '@vinejs/compiler/types' or its corresponding type declarations.
+  There are types at 'L:/chat_app/chat-app-backend/node_modules/@vinejs/compiler/build/src/types.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/@vinejs/vine/build/src/vine/validator.d.ts(10,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.

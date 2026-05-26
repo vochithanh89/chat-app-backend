@@ -7,6 +7,7 @@ import { ApiResponse } from '#utils/api_response'
 import { aiChatValidator } from '#validators/ai'
 import chatbot from '#services/chatbot_service'
 import messageService from '#services/message_service'
+import realtimeService from '#services/realtime_service'
 
 export default class AiController {
   /**
@@ -55,6 +56,38 @@ export default class AiController {
 
     await conv.load('members', (q) => q.preload('user'))
     return ApiResponse.created(response, 'AI conversation started.', { conversation: conv })
+  }
+
+  /**
+   * @startNewConversation
+   * @operationId startNewAiConversation
+   * @description Force-creates a new AI conversation between the user and the bot.
+   */
+  public async startNewConversation({ response, auth }: HttpContext) {
+    if (!chatbot.isEnabled()) {
+      return ApiResponse.error(response, 503, 'AI is disabled. Configure GEMINI_API_KEY.')
+    }
+    const me = auth.use('jwt').getUserOrFail()
+    const bot = await chatbot.getBotUser()
+
+    const conv = await db.transaction(async (trx) => {
+      const c = await Conversation.create({ type: 'direct', createdBy: me.id }, { client: trx })
+      await ConversationMember.createMany(
+        [
+          { conversationId: c.id, userId: me.id, role: 'member', joinedAt: DateTime.now() },
+          { conversationId: c.id, userId: bot.id, role: 'member', joinedAt: DateTime.now() },
+        ],
+        { client: trx }
+      )
+      return c
+    })
+
+    await conv.load('members', (q) => q.preload('user'))
+    // Realtime: join sockets and notify the current user's sidebars so
+    // the new conversation appears immediately without a full refresh.
+    await realtimeService.joinUserToConversation(me.id, conv)
+    realtimeService.emitToUser(me.id, 'conversation:joined', { conversationId: conv.uuid })
+    return ApiResponse.created(response, 'New AI conversation started.', { conversation: conv })
   }
 
   /**

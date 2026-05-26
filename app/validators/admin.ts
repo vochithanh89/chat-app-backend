@@ -10,5 +10,7 @@ export const statsRangeValidator = vine.compile(
   vine.object({
     period: vine.enum(['day', 'week', 'month'] as const).optional(),
     days: vine.number().positive().max(365).optional(),
+    from: vine.string().optional(),
+    to: vine.string().optional(),
   })
 )

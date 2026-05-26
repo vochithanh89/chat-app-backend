@@ -18,6 +18,7 @@ const MessagesController = () => import('#controllers/messages_controller')
 const AiController = () => import('#controllers/ai_controller')
 const ReportsController = () => import('#controllers/reports_controller')
 const AdminController = () => import('#controllers/admin_controller')
+const PollsController = () => import('#controllers/polls_controller')
 
 // Swagger spec + UI
 router.get('/swagger', async () => {
@@ -124,6 +125,9 @@ router
           .post('/conversations/:id/leave', [ConversationsController, 'leave'])
           .as('conversations.leave')
         router
+          .post('/conversations/:id/archive', [ConversationsController, 'archive'])
+          .as('conversations.archive')
+        router
           .put('/conversations/:id/members/:userId/role', [
             ConversationsController,
             'updateMemberRole',
@@ -147,6 +151,28 @@ router
         router
           .post('/conversations/:id/pin', [ConversationsController, 'togglePin'])
           .as('conversations.togglePin')
+        router
+          .put('/conversations/:id/settings', [ConversationsController, 'updateSettings'])
+          .as('conversations.updateSettings')
+        router
+          .post('/conversations/:id/invite-code/regenerate', [
+            ConversationsController,
+            'regenerateInviteCode',
+          ])
+          .as('conversations.regenerateInviteCode')
+        router
+          .post('/conversations/join', [ConversationsController, 'joinByCode'])
+          .as('conversations.joinByCode')
+
+        // Polls
+        router
+          .post('/conversations/:conversationId/polls', [PollsController, 'create'])
+          .as('polls.create')
+        router.get('/polls/:id', [PollsController, 'show']).as('polls.show')
+        router.post('/polls/:id/vote', [PollsController, 'vote']).as('polls.vote')
+        router.delete('/polls/:id/vote', [PollsController, 'unvote']).as('polls.unvote')
+        router.post('/polls/:id/close', [PollsController, 'close']).as('polls.close')
+        router.get('/polls/:id/voters', [PollsController, 'voters']).as('polls.voters')
 
         // Messages
         router
@@ -178,6 +204,9 @@ router
         router
           .post('/ai/conversations', [AiController, 'startConversation'])
           .as('ai.startConversation')
+        router.post('/ai/conversations/new', [AiController, 'startNewConversation']).as(
+          'ai.startNewConversation'
+        )
         router.post('/ai/chat', [AiController, 'chat']).as('ai.chat')
 
         // Reports (user side)
@@ -191,6 +220,9 @@ router
             router
               .get('/admin/stats/messages', [AdminController, 'messageStats'])
               .as('admin.stats.messages')
+            router
+              .get('/admin/stats/overview', [AdminController, 'overviewStats'])
+              .as('admin.stats.overview')
             router.get('/admin/users', [AdminController, 'listUsers']).as('admin.users.list')
             router
               .put('/admin/users/:id/status', [AdminController, 'updateUserStatus'])

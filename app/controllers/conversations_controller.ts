@@ -16,7 +16,10 @@ import {
   updateMemberRoleValidator,
   transferOwnershipValidator,
   markReadValidator,
+  joinByCodeValidator,
+  updateGroupSettingsValidator,
 } from '#validators/conversation'
+import { generateInviteCode } from '#models/conversation'
 import { updateAvatarValidator } from '#validators/update_avatar'
 import messageService from '#services/message_service'
 import realtimeService from '#services/realtime_service'
@@ -261,9 +264,11 @@ export default class ConversationsController {
    */
   public async createGroup({ request, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
-    const { name, member_ids: memberUuids } = await request.validateUsing(
-      createGroupConversationValidator
-    )
+    const {
+      name,
+      member_ids: memberUuids,
+      comments_restricted: commentsRestricted,
+    } = await request.validateUsing(createGroupConversationValidator)
 
     const resolvedIds = await resolveUserIds(memberUuids)
     const uniqueIds = Array.from(new Set(resolvedIds.filter((id) => id !== me.id)))
@@ -273,7 +278,13 @@ export default class ConversationsController {
 
     const conv = await db.transaction(async (trx) => {
       const c = await Conversation.create(
-        { type: 'group', name, ownerId: me.id, createdBy: me.id },
+        {
+          type: 'group',
+          name,
+          ownerId: me.id,
+          createdBy: me.id,
+          commentsRestricted: commentsRestricted ?? false,
+        },
         { client: trx }
       )
       const rows = [
@@ -532,6 +543,41 @@ export default class ConversationsController {
   }
 
   /**
+   * @archive
+   * @operationId archiveConversation
+   * @description Archives (hides) the conversation for the current user by removing their membership row. Works for direct and group conversations.
+   * @paramPath id - Conversation ID.
+   */
+  public async archive({ params, response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const conv = await resolveByUuid(params.id)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
+
+    const member = await ConversationMember.query()
+      .where('conversation_id', conv.id)
+      .andWhere('user_id', me.id)
+      .first()
+    if (!member) return ApiResponse.error(response, 403, 'Not a member of this conversation.')
+
+    // Remove the membership so the conversation no longer appears in the user's sidebar.
+    await ConversationMember.query()
+      .where('conversation_id', conv.id)
+      .andWhere('user_id', me.id)
+      .delete()
+
+    // Realtime: notify this user's other tabs and make sockets leave the room.
+    realtimeService.emitToUser(me.id, 'conversation:removed', {
+      conversationId: conv.uuid,
+    })
+    await realtimeService.leaveUserFromConversation(me.id, conv.id)
+    realtimeService.emitToConversation(conv.id, 'conversation:members-changed', {
+      conversationId: conv.uuid,
+    })
+
+    return ApiResponse.ok(response, 'Conversation archived for user.', null)
+  }
+
+  /**
    * @updateMemberRole
    * @operationId updateMemberRole
    * @description Promotes/demotes a member to admin or member. Owner only.
@@ -779,5 +825,116 @@ export default class ConversationsController {
     await myMember.save()
 
     return ApiResponse.ok(response, 'Pin status updated.', { isPinned: myMember.isPinned })
+  }
+
+  /**
+   * @updateSettings
+   * @operationId updateGroupSettings
+   * @description Updates group-wide settings (currently: comments_restricted). Owner or admin only.
+   * @paramPath id - Conversation ID.
+   * @requestBody {"comments_restricted": "boolean"}
+   * @responseBody 200 - {"success": true, "message": "string", "data": {"conversation": "object"}}
+   * @responseBody 403 - {"success": false, "message": "Forbidden.", "errors": []}
+   */
+  public async updateSettings({ params, request, response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const conv = await resolveByUuid(params.id)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
+    if (conv.type !== 'group') {
+      return ApiResponse.error(response, 400, 'Only groups have settings.')
+    }
+    const myMember = await messageService.assertMember(conv.id, me.id)
+    if (!myMember || (myMember.role !== 'owner' && myMember.role !== 'admin')) {
+      return ApiResponse.error(response, 403, 'Only owner or admin can change settings.')
+    }
+    const { comments_restricted: commentsRestricted } = await request.validateUsing(
+      updateGroupSettingsValidator
+    )
+    if (commentsRestricted !== undefined) {
+      conv.commentsRestricted = commentsRestricted
+    }
+    await conv.save()
+    realtimeService.emitToConversation(conv.id, 'conversation:members-changed', {
+      conversationId: conv.uuid,
+    })
+    return ApiResponse.ok(response, 'Settings updated.', { conversation: conv })
+  }
+
+  /**
+   * @regenerateInviteCode
+   * @operationId regenerateInviteCode
+   * @description Rotates the group invite code (invalidates the old QR). Owner or admin only.
+   * @paramPath id - Conversation ID.
+   * @responseBody 200 - {"success": true, "message": "string", "data": {"inviteCode": "string"}}
+   */
+  public async regenerateInviteCode({ params, response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const conv = await resolveByUuid(params.id)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
+    if (conv.type !== 'group') {
+      return ApiResponse.error(response, 400, 'Only groups have invite codes.')
+    }
+    const myMember = await messageService.assertMember(conv.id, me.id)
+    if (!myMember || (myMember.role !== 'owner' && myMember.role !== 'admin')) {
+      return ApiResponse.error(response, 403, 'Only owner or admin can regenerate the code.')
+    }
+
+    // Retry on the (unlikely) unique-collision so callers always get a code.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const code = generateInviteCode()
+      const taken = await Conversation.query().where('invite_code', code).first()
+      if (!taken) {
+        conv.inviteCode = code
+        await conv.save()
+        return ApiResponse.ok(response, 'Invite code regenerated.', { inviteCode: code })
+      }
+    }
+    return ApiResponse.error(response, 500, 'Failed to generate a unique invite code.')
+  }
+
+  /**
+   * @joinByCode
+   * @operationId joinGroupByCode
+   * @description Joins a group conversation using its invite code (from QR or shared link). Anyone with the code can join.
+   * @requestBody {"code": "string"}
+   * @responseBody 200 - {"success": true, "message": "string", "data": {"conversation": "object"}}
+   * @responseBody 404 - {"success": false, "message": "Invite code not found.", "errors": []}
+   */
+  public async joinByCode({ request, response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const { code } = await request.validateUsing(joinByCodeValidator)
+
+    const conv = await Conversation.query()
+      .where('invite_code', code.toUpperCase())
+      .andWhere('type', 'group')
+      .first()
+    if (!conv) return ApiResponse.error(response, 404, 'Invite code not found.')
+
+    const existing = await ConversationMember.query()
+      .where('conversation_id', conv.id)
+      .andWhere('user_id', me.id)
+      .first()
+
+    if (!existing) {
+      await ConversationMember.create({
+        conversationId: conv.id,
+        userId: me.id,
+        role: 'member',
+        joinedAt: DateTime.now(),
+      })
+
+      await realtimeService.joinUserToConversation(me.id, conv)
+      realtimeService.emitToUser(me.id, 'conversation:joined', {
+        conversationId: conv.uuid,
+      })
+      realtimeService.emitToConversation(conv.id, 'conversation:members-changed', {
+        conversationId: conv.uuid,
+      })
+    }
+
+    await conv.load('members', (q) => q.preload('user'))
+    return ApiResponse.ok(response, existing ? 'Already a member.' : 'Joined group.', {
+      conversation: conv,
+    })
   }
 }

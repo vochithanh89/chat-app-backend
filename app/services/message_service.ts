@@ -223,6 +223,38 @@ class MessageService {
       pinnedByUuid = uuidMap.get(m.pinnedBy) ?? null
     }
 
+    // Poll payload — only present when the message is poll-bearing and
+    // the caller preloaded the `poll` relation.
+    let pollPayload: Record<string, unknown> | null = null
+    const poll = (m as any).poll
+    if (poll) {
+      const { default: PollOption } = await import('#models/poll_option')
+      const { default: PollVote } = await import('#models/poll_vote')
+      await poll.load((l: any) => l.load('options', (q: any) => q.orderBy('position', 'asc').preload('votes')))
+      const optionIds = poll.options.map((o: any) => o.id)
+      let mySet = new Set<number>()
+      if (viewerUserId && optionIds.length > 0) {
+        const mine = await PollVote.query()
+          .whereIn('poll_option_id', optionIds)
+          .andWhere('user_id', viewerUserId)
+        mySet = new Set(mine.map((v) => v.pollOptionId))
+      }
+      void PollOption
+      pollPayload = {
+        id: poll.uuid,
+        question: poll.question,
+        allowMultiple: poll.allowMultiple,
+        isClosed: poll.isClosed,
+        options: poll.options.map((o: any) => ({
+          id: o.uuid,
+          text: o.text,
+          voteCount: o.votes?.length ?? 0,
+          votedByMe: mySet.has(o.id),
+        })),
+        totalVotes: poll.options.reduce((sum: number, o: any) => sum + (o.votes?.length ?? 0), 0),
+      }
+    }
+
     return {
       id: m.uuid,
       conversationId: conversationUuid,
@@ -248,6 +280,7 @@ class MessageService {
         userId: reactionUserMap.get(r.userId) ?? null,
         emoji: r.emoji,
       })),
+      poll: pollPayload,
     }
   }
 }

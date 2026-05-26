@@ -77,6 +77,99 @@ export default class AdminController {
     })
   }
 
+  public async overviewStats({ request, response }: HttpContext) {
+    const { period, days, from, to } = await request.validateUsing(statsRangeValidator, {
+      data: request.qs(),
+    })
+
+    let start: DateTime
+    let end: DateTime
+    let selectedPeriod = period ?? 'day'
+
+    if (from && to) {
+      start = DateTime.fromISO(from).startOf('day')
+      end = DateTime.fromISO(to).endOf('day')
+      if (!start.isValid || !end.isValid || start > end) {
+        return ApiResponse.error(response, 422, 'Invalid date range.')
+      }
+
+      const rangeDays = Math.max(1, Math.floor(end.diff(start, 'days').days) + 1)
+      if (!period) {
+        selectedPeriod = rangeDays <= 90 ? 'day' : rangeDays <= 365 ? 'month' : 'month'
+      }
+    } else {
+      selectedPeriod = period ?? 'day'
+      const range = rangeStart(selectedPeriod, days)
+      start = range.start
+      end = DateTime.now().endOf('day')
+    }
+
+    const bucket =
+      selectedPeriod === 'day' ? '%Y-%m-%d' : selectedPeriod === 'week' ? '%x-%v' : '%Y-%m'
+    const startSql = start.toSQL({ includeOffset: false })!
+    const endSql = end.toSQL({ includeOffset: false })!
+
+    const [userRows, conversationRows, groupRows, messageRows] = await Promise.all([
+      db
+        .from('users')
+        .select(db.raw(`DATE_FORMAT(created_at, '${bucket}') as bucket`))
+        .count('* as total')
+        .where('created_at', '>=', startSql)
+        .andWhere('created_at', '<=', endSql)
+        .groupByRaw('bucket')
+        .orderByRaw('bucket asc'),
+      db
+        .from('conversations')
+        .select(db.raw(`DATE_FORMAT(created_at, '${bucket}') as bucket`))
+        .count('* as total')
+        .where('created_at', '>=', startSql)
+        .andWhere('created_at', '<=', endSql)
+        .groupByRaw('bucket')
+        .orderByRaw('bucket asc'),
+      db
+        .from('conversations')
+        .select(db.raw(`DATE_FORMAT(created_at, '${bucket}') as bucket`))
+        .count('* as total')
+        .where('created_at', '>=', startSql)
+        .andWhere('created_at', '<=', endSql)
+        .where('type', 'group')
+        .groupByRaw('bucket')
+        .orderByRaw('bucket asc'),
+      db
+        .from('messages')
+        .select(db.raw(`DATE_FORMAT(created_at, '${bucket}') as bucket`))
+        .count('* as total')
+        .where('created_at', '>=', startSql)
+        .andWhere('created_at', '<=', endSql)
+        .groupByRaw('bucket')
+        .orderByRaw('bucket asc'),
+    ])
+
+    return ApiResponse.ok(response, 'OK', {
+      period: selectedPeriod,
+      from: start.toISODate(),
+      to: end.toISODate(),
+      series: {
+        totalUsers: userRows.map((r: any) => ({ bucket: r.bucket, total: Number(r.total) })),
+        newUsers: userRows.map((r: any) => ({ bucket: r.bucket, total: Number(r.total) })),
+        conversations: conversationRows.map((r: any) => ({
+          bucket: r.bucket,
+          total: Number(r.total),
+        })),
+        groups: groupRows.map((r: any) => ({ bucket: r.bucket, total: Number(r.total) })),
+        messages: messageRows.map((r: any) => ({ bucket: r.bucket, total: Number(r.total) })),
+      },
+    })
+  }
+
+  /*
+   * NOTE: There appears to be duplicated/stray query code below this point
+   * (starting with `db.from('users')`), which causes a TypeScript parse error
+   * and breaks the entire /admin/* endpoints.
+   * This block should be removed.
+   */
+  /* (duplicate/stray block removed) */
+
   /**
    * @listUsers
    * @operationId adminListUsers

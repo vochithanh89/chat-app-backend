@@ -36,6 +36,9 @@ export default class MessageAttachment extends BaseModel {
   @column()
   declare fileSize: number | null
 
+  @column()
+  declare durationMs: number | null
+
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
 
