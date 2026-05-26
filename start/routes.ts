@@ -220,6 +220,9 @@ router
             router
               .get('/admin/stats/messages', [AdminController, 'messageStats'])
               .as('admin.stats.messages')
+            router
+              .get('/admin/stats/overview', [AdminController, 'overviewStats'])
+              .as('admin.stats.overview')
             router.get('/admin/users', [AdminController, 'listUsers']).as('admin.users.list')
             router
               .put('/admin/users/:id/status', [AdminController, 'updateUserStatus'])
