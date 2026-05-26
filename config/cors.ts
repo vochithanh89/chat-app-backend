@@ -10,7 +10,8 @@ const corsConfig = defineConfig({
   enabled: true,
   origin: [
     'http://localhost:5173', // Port mặc định khi chạy dưới máy local
-    'https://chat-app-web-frontend-ten.vercel.app', // 🌟 THÊM CHÍNH XÁC LINK VERCEL CỦA BẠN VÀO ĐÂY
+    'https://chat-app-web-frontend-ten.vercel.app', // Vercel frontend
+    'https://storied-churros-be1dd4.netlify.app', // Netlify frontend
   ],
   methods: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
   headers: true,
