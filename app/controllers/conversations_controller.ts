@@ -736,12 +736,20 @@ export default class ConversationsController {
       if (m) lastMessagePublicId = m.uuid
     }
 
-    realtimeService.emitToConversation(conv.id, 'conversation:read', {
-      conversationId: conv.uuid,
-      userId: me.uuid,
-      lastReadAt: now,
-      lastMessageId: lastMessagePublicId,
-    })
+    // Only broadcast read receipt if user is NOT in privacy mode.
+    // When privacy mode is on, lastReadAt is still updated (so their
+    // own unread counts reset) but other users won't see the receipt.
+    const fullUser = await User.find(me.id)
+    const isPrivate = fullUser?.isPrivatePresence ?? false
+
+    if (!isPrivate) {
+      realtimeService.emitToConversation(conv.id, 'conversation:read', {
+        conversationId: conv.uuid,
+        userId: me.uuid,
+        lastReadAt: now,
+        lastMessageId: lastMessagePublicId,
+      })
+    }
 
     return ApiResponse.ok(response, 'OK', { lastReadAt: now })
   }

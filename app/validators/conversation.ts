@@ -51,6 +51,6 @@ export const markReadValidator = vine.compile(
   vine.object({
     // Optional — UUID of the latest message the client saw. Lets the
     // server timestamp lastReadAt from that specific moment.
-    last_message_id: vine.string().uuid().optional(),
+    last_message_id: vine.string().uuid().nullable().optional(),
   })
 )
