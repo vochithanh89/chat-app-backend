@@ -19,6 +19,7 @@ const AiController = () => import('#controllers/ai_controller')
 const ReportsController = () => import('#controllers/reports_controller')
 const AdminController = () => import('#controllers/admin_controller')
 const PollsController = () => import('#controllers/polls_controller')
+const QrLoginController = () => import('#controllers/qr_login_controller')
 
 // Swagger spec + UI
 router.get('/swagger', async () => {
@@ -32,9 +33,6 @@ router
   .group(() => {
     // Public auth routes
     router.post('/auth/login', [AuthController, 'login']).as('auth.login')
-    router.post('/auth/qr/generate', [AuthController, 'generateQr']).as('auth.qr.generate')
-    router.post('/auth/qr/scan', [AuthController, 'scanQr']).as('auth.qr.scan')
-    router.get('/auth/qr/status', [AuthController, 'qrStatus']).as('auth.qr.status')
     router.post('/auth/register', [AuthController, 'register']).as('auth.register')
     router.post('/auth/refresh', [AuthController, 'refresh']).as('auth.refresh')
     router.post('/auth/verify-email', [AuthController, 'verifyEmail']).as('auth.verifyEmail')
@@ -43,10 +41,6 @@ router
       .post('/auth/forgot-password', [AuthController, 'forgotPassword'])
       .as('auth.forgotPassword')
     router.post('/auth/reset-password', [AuthController, 'resetPassword']).as('auth.resetPassword')
-
-    // WebSockets based QR Login
-    const QrLoginController = () => import('#controllers/qr_login_controller')
-    router.post('/qr-login/generate', [QrLoginController, 'generate']).as('qrLogin.generate')
 
     // QR Login Public
     router.post('/qr-login/generate', [QrLoginController, 'generate']).as('qrLogin.generate')
