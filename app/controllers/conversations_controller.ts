@@ -844,16 +844,20 @@ export default class ConversationsController {
     if (!myMember || (myMember.role !== 'owner' && myMember.role !== 'admin')) {
       return ApiResponse.error(response, 403, 'Only owner or admin can change settings.')
     }
-    const { comments_restricted: commentsRestricted } = await request.validateUsing(
+    const { comments_restricted: commentsRestricted, name } = await request.validateUsing(
       updateGroupSettingsValidator
     )
     if (commentsRestricted !== undefined) {
       conv.commentsRestricted = commentsRestricted
     }
+    if (name !== undefined) {
+      conv.name = name
+    }
     await conv.save()
     realtimeService.emitToConversation(conv.id, 'conversation:members-changed', {
       conversationId: conv.uuid,
     })
+    await conv.load('members', (q) => q.preload('user'))
     return ApiResponse.ok(response, 'Settings updated.', { conversation: conv })
   }
 
