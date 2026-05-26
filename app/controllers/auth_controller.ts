@@ -1,9 +1,7 @@
 import User from '#models/user'
 import DeviceToken from '#models/device_token'
 import { HttpContext } from '@adonisjs/core/http'
-import mail from '@adonisjs/mail/services/main'
-import VerifyEmailNotification from '#mails/verify_email_notification'
-import ForgotPasswordNotification from '#mails/forgot_password_notification'
+import MailService from '#services/mail_service'
 import { DateTime } from 'luxon'
 import { userRegistrationValidator } from '#validators/user_registration'
 import { userLoginValidator } from '#validators/user_login'
@@ -62,18 +60,14 @@ export default class AuthController {
     }
     // Determine the device category for session management.
     // mobile_android and mobile_ios are both treated as 'mobile' — only 1 web + 1 mobile allowed.
-    const deviceCategory = deviceType
-      ? deviceType === 'web' ? 'web' : 'mobile'
-      : undefined
+    const deviceCategory = deviceType ? (deviceType === 'web' ? 'web' : 'mobile') : undefined
 
     // Revoke any existing refresh tokens for the same device category (single session per category)
     if (deviceCategory) {
       const allRefresh = await User.refreshTokens.all(user)
       for (const t of allRefresh) {
         const tokenName = (t as any).name as string | undefined
-        const tokenCategory = tokenName
-          ? tokenName === 'web' ? 'web' : 'mobile'
-          : undefined
+        const tokenCategory = tokenName ? (tokenName === 'web' ? 'web' : 'mobile') : undefined
         if (tokenCategory === deviceCategory) {
           await User.refreshTokens.delete(user, (t as any).identifier)
         }
@@ -82,7 +76,7 @@ export default class AuthController {
 
     const tokens = await auth.use('jwt').generate(user)
     // Create refresh token and tag it with device type (if provided)
-    const refreshTokenRow = await User.refreshTokens.create(user, { name: deviceType })
+    const refreshTokenRow = await User.refreshTokens.create(user, { name: deviceType } as any)
 
     user.isOnline = true
     user.lastSeenAt = DateTime.now()
@@ -178,7 +172,7 @@ export default class AuthController {
     if ((payload as any).accepted_terms) {
       userPayload.acceptedTermsAt = DateTime.now()
     }
-    
+
     // Remove non-model properties before DB insertion
     delete userPayload.accepted_terms
 
@@ -197,7 +191,7 @@ export default class AuthController {
       }
     }
 
-    await mail.send(new VerifyEmailNotification(user, otp))
+    await MailService.sendOTP(user.email, otp)
 
     return ApiResponse.created(
       response,
@@ -210,7 +204,7 @@ export default class AuthController {
    * Generate a short-lived QR token for web login. Stored server-side and
    * scanned by a mobile client to authenticate the web session.
    */
-  public async generateQr({ request, response }: HttpContext) {
+  public async generateQr({ response }: HttpContext) {
     const qrToken = randomBytes(16).toString('hex')
     const expiresAt = DateTime.now().plus({ minutes: 3 })
 
@@ -244,7 +238,7 @@ export default class AuthController {
       return ApiResponse.error(response, 400, 'QR token expired.')
     }
 
-    await db.table('qr_tokens').where('token', qrToken).update({
+    await db.from('qr_tokens').where('token', qrToken).update({
       user_id: user.id,
       scanned_at: DateTime.now().toISO(),
     })
@@ -286,7 +280,7 @@ export default class AuthController {
     }
 
     const tokens = await auth.use('jwt').generate(user)
-    const refreshTokenRow = await User.refreshTokens.create(user, { name: 'web' })
+    const refreshTokenRow = await User.refreshTokens.create(user, { name: 'web' } as any)
 
     // Notify existing web sessions that they are being replaced
     realtimeService.emitToUserDeviceType(user.id, 'web', 'auth:session_replaced', {
@@ -354,7 +348,7 @@ export default class AuthController {
     const otp = generateOtp()
     user.verificationToken = otp
     await user.save()
-    await mail.send(new VerifyEmailNotification(user, otp))
+    await MailService.sendOTP(user.email, otp)
 
     return ApiResponse.ok(
       response,
@@ -389,7 +383,7 @@ export default class AuthController {
       created_at: DateTime.now().toISO(),
     })
 
-    await mail.send(new ForgotPasswordNotification(user, token))
+    await (MailService as any).sendPasswordReset(user.email, token)
 
     return ApiResponse.ok(
       response,
@@ -449,8 +443,11 @@ export default class AuthController {
    * @responseBody 400 - {"success": false, "message": "Current password is incorrect.", "errors": []}
    */
   public async changePassword({ request, response, auth }: HttpContext) {
-    const { current_password: currentPassword, password, device_type: deviceType } =
-      await request.validateUsing(changePasswordValidator)
+    const {
+      current_password: currentPassword,
+      password,
+      device_type: deviceType,
+    } = await request.validateUsing(changePasswordValidator)
 
     const user = auth.use('jwt').getUserOrFail()
     const valid = await hash.verify(user.password, currentPassword)
@@ -461,17 +458,13 @@ export default class AuthController {
     user.password = password
     await user.save()
 
-    const deviceCategory = deviceType
-      ? deviceType === 'web' ? 'web' : 'mobile'
-      : undefined
+    const deviceCategory = deviceType ? (deviceType === 'web' ? 'web' : 'mobile') : undefined
 
     const allTokens = await User.refreshTokens.all(user)
 
     for (const t of allTokens) {
       const tokenName = (t as any).name as string | undefined
-      const tokenCategory = tokenName
-        ? tokenName === 'web' ? 'web' : 'mobile'
-        : undefined
+      const tokenCategory = tokenName ? (tokenName === 'web' ? 'web' : 'mobile') : undefined
 
       // If deviceCategory is provided, keep the token for the current category.
       // Otherwise, revoke all tokens.
