@@ -67,4 +67,14 @@ export default await Env.create(new URL('../', import.meta.url), {
   */
   GEMINI_API_KEY: Env.schema.string.optional(),
   GEMINI_MODEL: Env.schema.string.optional(),
+
+  /*
+  |----------------------------------------------------------
+  | AWS S3 Upload Config
+  |----------------------------------------------------------
+  */
+  S3_BUCKET_NAME: Env.schema.string.optional(),
+  S3_REGION: Env.schema.string.optional(),
+  S3_ACCESS_KEY_ID: Env.schema.string.optional(),
+  S3_SECRET_ACCESS_KEY: Env.schema.string.optional(),
 })

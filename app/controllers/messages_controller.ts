@@ -1,5 +1,5 @@
 import type { HttpContext } from '@adonisjs/core/http'
-import app from '@adonisjs/core/services/app'
+
 import { DateTime } from 'luxon'
 import Conversation from '#models/conversation'
 import Message from '#models/message'
@@ -17,6 +17,7 @@ import {
 } from '#validators/message'
 import messageService from '#services/message_service'
 import realtime from '#services/realtime_service'
+import s3Service from '#services/s3_service'
 
 function detectAttachmentType(extname: string): AttachmentType {
   const ext = extname.toLowerCase()
@@ -168,11 +169,11 @@ export default class MessagesController {
     const { file, duration_ms: durationMs, type: typeOverride } =
       await request.validateUsing(uploadAttachmentValidator)
 
-    const fileName = `${me.id}_${Date.now()}.${file.extname}`
-    await file.move(app.makePath('public/uploads/messages'), { name: fileName, overwrite: true })
-
-    const baseUrl = `${request.protocol()}://${request.host()}`
-    const url = `${baseUrl}/uploads/messages/${fileName}`
+    const fileName = `${me.id}_${file.clientName}`
+    
+    // Upload message attachment to S3
+    const s3Url = await s3Service.upload(file, 'messages', fileName)
+    const url = s3Url
 
     // audio/webm from MediaRecorder lands here with .webm but should be
     // treated as audio, not video — honor the caller-provided override.

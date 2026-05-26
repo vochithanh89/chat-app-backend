@@ -1,5 +1,5 @@
 import type { HttpContext } from '@adonisjs/core/http'
-import app from '@adonisjs/core/services/app'
+
 import { DateTime } from 'luxon'
 import db from '@adonisjs/lucid/services/db'
 import Conversation from '#models/conversation'
@@ -23,6 +23,7 @@ import { generateInviteCode } from '#models/conversation'
 import { updateAvatarValidator } from '#validators/update_avatar'
 import messageService from '#services/message_service'
 import realtimeService from '#services/realtime_service'
+import s3Service from '#services/s3_service'
 
 /** Resolve a conversation by its public UUID. */
 async function resolveByUuid(uuid: string) {
@@ -748,15 +749,11 @@ export default class ConversationsController {
 
     const { avatar } = await request.validateUsing(updateAvatarValidator)
 
-    const fileName = `group_${conv.id}_${Date.now()}.${avatar.extname}`
-    await avatar.move(app.makePath('public/uploads/group-avatars'), {
-      name: fileName,
-      overwrite: true,
-    })
-
-    const publicPath = `/uploads/group-avatars/${fileName}`
-    const baseUrl = `${request.protocol()}://${request.host()}`
-    conv.avatarUrl = `${baseUrl}${publicPath}`
+    const fileName = `group_${conv.id}_avatar.${avatar.extname}`
+    
+    // Upload group avatar to S3
+    const s3Url = await s3Service.upload(avatar, 'group-avatars', fileName)
+    conv.avatarUrl = s3Url
     await conv.save()
 
     // Notify every member so their sidebar icon + chat header refresh.

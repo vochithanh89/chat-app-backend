@@ -3,10 +3,11 @@ import DeviceToken from '#models/device_token'
 import { updateProfileValidator } from '#validators/update_profile'
 import { updateAvatarValidator } from '#validators/update_avatar'
 import { searchUsersValidator, registerDeviceTokenValidator } from '#validators/friendship'
-import app from '@adonisjs/core/services/app'
+
 import { DateTime } from 'luxon'
 import type { HttpContext } from '@adonisjs/core/http'
 import { ApiResponse } from '#utils/api_response'
+import s3Service from '#services/s3_service'
 
 export default class UsersController {
   /**
@@ -75,15 +76,11 @@ export default class UsersController {
     const user = auth.use('jwt').getUserOrFail()
     const { avatar } = await request.validateUsing(updateAvatarValidator)
 
-    const fileName = `${user.id}_${Date.now()}.${avatar.extname}`
-    await avatar.move(app.makePath('public/uploads/avatars'), {
-      name: fileName,
-      overwrite: true,
-    })
-
-    const publicPath = `/uploads/avatars/${fileName}`
-    const baseUrl = `${request.protocol()}://${request.host()}`
-    user.avatarUrl = `${baseUrl}${publicPath}`
+    const fileName = `${user.id}_avatar.${avatar.extname}`
+    
+    // Upload avatar to S3
+    const s3Url = await s3Service.upload(avatar, 'avatars', fileName)
+    user.avatarUrl = s3Url
     await user.save()
 
     return ApiResponse.ok(response, 'Avatar updated.', {
