@@ -48,6 +48,9 @@ router
     const QrLoginController = () => import('#controllers/qr_login_controller')
     router.post('/qr-login/generate', [QrLoginController, 'generate']).as('qrLogin.generate')
 
+    // QR Login Public
+    router.post('/qr-login/generate', [QrLoginController, 'generate']).as('qrLogin.generate')
+
     // Auth-only (JWT)
     router
       .group(() => {
@@ -55,7 +58,6 @@ router
         router
           .post('/auth/change-password', [AuthController, 'changePassword'])
           .as('auth.changePassword')
-          
         router.post('/qr-login/scan', [QrLoginController, 'scan']).as('qrLogin.scan')
         router.post('/qr-login/confirm', [QrLoginController, 'confirm']).as('qrLogin.confirm')
         router.post('/qr-login/reject', [QrLoginController, 'reject']).as('qrLogin.reject')

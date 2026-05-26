@@ -38,6 +38,10 @@ class RealtimeService {
     this.io = new IOServer(httpServer, {
       cors: { origin: '*' },
       path: '/socket.io',
+      // Tighter heartbeats so abrupt disconnects (network drop, tab crash,
+      // laptop sleep) are detected in ~12s instead of the default ~45s.
+      // Clean tab closes are detected immediately via the WebSocket close
+      // frame and do not wait for the heartbeat.
       pingInterval: 10_000,
       pingTimeout: 5_000,
     })
@@ -47,7 +51,7 @@ class RealtimeService {
         const token =
           socket.handshake.auth?.token ??
           (socket.handshake.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
-          
+
         if (!token) {
           (socket as AuthedSocket).data = { userId: 0 }
           return next()
@@ -87,6 +91,9 @@ class RealtimeService {
 
       logger.info({ userId, socketId: socket.id }, 'socket connected')
 
+      // --- Register the disconnect listener FIRST, before any await, so
+      // we never lose a disconnect event if the socket drops while we are
+      // still doing initial setup (e.g. loading memberships from DB).
       socket.on('disconnect', (reason) => {
         logger.info({ userId, socketId: socket.id, reason }, 'socket disconnected')
         // Note: We don't broadcast a `group-call:leave` here because abrupt
@@ -104,6 +111,8 @@ class RealtimeService {
         }
       })
 
+      // --- Presence counter — also before any await so we never miss an
+      // increment that would leave the user stuck in the wrong state.
       const prevCount = this.connections.get(userId) ?? 0
       this.connections.set(userId, prevCount + 1)
       if (prevCount === 0) {
@@ -124,6 +133,11 @@ class RealtimeService {
         socket.leave(`conv:${conversationId}`)
       })
 
+      // Typing indicators — broadcast to other members of the
+      // conversation room, excluding the sender. Payload:
+      //   { conversationId: "uuid" }
+      // The server resolves the UUID via the pre-cached map so we
+      // don't touch the DB on every keystroke.
       socket.on('typing:start', (data: { conversationId?: string }) => {
         const convUuid = data?.conversationId
         if (!convUuid) return
@@ -202,6 +216,9 @@ class RealtimeService {
       // --- Room Setup ---
       socket.join(`user:${userId}`)
       try {
+        // Load the user's UUID + all memberships (with conversation
+        // UUIDs) once per connection. These feed the transient-event
+        // cache described above.
         const user = await User.find(userId)
         if (user?.uuid) {
           authedSocket.data.userUuid = user.uuid
@@ -234,6 +251,11 @@ class RealtimeService {
   emitToUser(userId: number | string, event: string, payload: unknown): void {
     if (!this.io) return
     this.io.to(`user:${userId}`).emit(event, payload)
+  }
+
+  emitToRoom(room: string, event: string, payload: unknown): void {
+    if (!this.io) return
+    this.io.to(room).emit(event, payload)
   }
 
   /**
@@ -281,6 +303,10 @@ class RealtimeService {
     }
   }
 
+  /**
+   * Persist an online/offline flip to the DB and fan out a
+   * `presence:changed` event so friends can update their UIs.
+   */
   private async markOnline(userId: number, online: boolean): Promise<void> {
     try {
       const user = await User.find(userId)
@@ -289,6 +315,9 @@ class RealtimeService {
       user.lastSeenAt = DateTime.now()
       await user.save()
 
+      // Let interested clients know. Broadcast globally for now — it's a
+      // single room lookup per subscriber. If this becomes noisy we can
+      // narrow it down to the friends of the user only.
       if (this.io) {
         this.io.emit('presence:changed', {
           userId: user.uuid,

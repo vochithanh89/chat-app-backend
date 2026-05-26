@@ -1,102 +1,135 @@
 import type { HttpContext } from '@adonisjs/core/http'
-import QrSessionService from '#services/qr_session_service'
-import realtimeService from '#services/realtime_service'
+import { ApiResponse } from '#utils/api_response'
+import QrLoginService from '#services/qr_login_service'
+import RealtimeService from '#services/realtime_service'
 import User from '#models/user'
-import env from '#start/env'
+import { DateTime } from 'luxon'
 
 export default class QrLoginController {
-  // GET /api/v1/qr-login/generate
-  // Web calls this to generate a QR
+  /**
+   * @generate
+   * @operationId generateQrLogin
+   * @description Generates a new QR login session.
+   * @responseBody 200 - {"success": true, "message": "string", "data": {"qrContent": "string", "sessionId": "string"}}
+   */
   public async generate({ response }: HttpContext) {
-    const session = QrSessionService.createSession()
-    
-    // Web will subscribe to `qr:${session.sessionId}` in realtimeService
-    return response.ok({
-      qrSessionId: session.sessionId,
-      qrContent: `mychat://qr-login?session=${session.sessionId}`,
-      expiresAt: session.expiresAt
+    const session = QrLoginService.generateSession()
+    // Web client will subscribe to `qr:${session.sessionId}` via RealtimeService
+    return ApiResponse.ok(response, 'QR session generated.', {
+      qrContent: session.qrContent,
+      sessionId: session.sessionId,
     })
   }
 
-  // POST /api/v1/qr-login/scan
-  // Mobile calls this after scanning
+  /**
+   * @scan
+   * @operationId scanQrLogin
+   * @description Mobile app scans the QR code.
+   * @requestBody {"qrContent": "string"}
+   * @responseBody 200 - {"success": true, "message": "string", "data": {}}
+   */
   public async scan({ request, response, auth }: HttpContext) {
-    const { qrSessionId } = request.only(['qrSessionId'])
+    const { qrContent } = request.only(['qrContent'])
     const user = auth.getUserOrFail()
 
-    const session = QrSessionService.getSession(qrSessionId)
+    // Find the session by its content
+    const session = Array.from(QrLoginService['sessions'].values()).find(s => s.qrContent === qrContent);
+
     if (!session) {
-      return response.badRequest({ message: 'QR session expired or invalid' })
+      return ApiResponse.error(response, 404, 'QR session not found or expired.')
     }
 
     if (session.status !== 'pending') {
-      return response.badRequest({ message: 'QR session already scanned' })
+      return ApiResponse.error(response, 400, 'QR session already scanned or expired.')
     }
 
-    QrSessionService.updateSession(qrSessionId, { status: 'scanned', userId: user.id })
-
-    // Emit to web that QR was scanned
-    realtimeService.io.to(`qr:${qrSessionId}`).emit('qr:scanned', {
-      user: {
-        id: user.id,
-        name: user.name,
-        avatar: user.avatarUrl
-      }
+    QrLoginService.updateSession(session.sessionId, {
+      status: 'scanned',
+      scannedByUserId: user.id,
     })
 
-    return response.ok({ message: 'QR scanned successfully' })
+    // Emit to web that QR was scanned
+    RealtimeService.emitToRoom(session.sessionId, 'qr:scanned', {
+      user: user.serialize(),
+    })
+
+    return ApiResponse.ok(response, 'QR code scanned.', null)
   }
 
-  // POST /api/v1/qr-login/confirm
-  // Mobile calls this after the user clicks "Confirm"
+  /**
+   * @confirm
+   * @operationId confirmQrLogin
+   * @description Mobile app confirms the login.
+   * @requestBody {"sessionId": "string"}
+   * @responseBody 200 - {"success": true, "message": "string", "data": {"accessToken": "string", "refreshToken": "string", "user": "object"}}
+   */
   public async confirm({ request, response, auth }: HttpContext) {
-    const { qrSessionId } = request.only(['qrSessionId'])
+    const { sessionId } = request.only(['sessionId'])
     const user = auth.getUserOrFail()
+    const session = QrLoginService.getSession(sessionId)
 
-    const session = QrSessionService.getSession(qrSessionId)
     if (!session) {
-      return response.badRequest({ message: 'QR session expired or invalid' })
+      return ApiResponse.error(response, 404, 'QR session not found or expired.')
     }
 
     if (session.status !== 'scanned') {
-      return response.badRequest({ message: 'QR session must be scanned first' })
+      return ApiResponse.error(response, 400, 'QR session must be scanned first.')
     }
 
-    if (session.userId !== user.id) {
-      return response.unauthorized({ message: 'User mismatch' })
+    if (session.scannedByUserId !== user.id) {
+      return ApiResponse.error(response, 403, 'Unauthorized to confirm this session.')
     }
 
-    QrSessionService.updateSession(qrSessionId, { status: 'confirmed' })
+    if (user.accountStatus === 'locked') {
+        return ApiResponse.error(response, 403, 'Your account has been locked. Contact support.')
+    }
 
     // Generate token for Web
-    const tokens = await auth.use('jwt').generate(user)
-    const refreshTokenRow = await User.refreshTokens.create(user, { name: 'web' })
+    const tokens = await User.accessTokens.create(user, ['*'], { name: 'web_qr_login' })
+    const refreshToken = await User.refreshTokens.create(user, { name: 'web_qr_login' })
 
-    realtimeService.io.to(`qr:${qrSessionId}`).emit('qr:confirmed', {
-      accessToken: (tokens as any).token,
-      refreshToken: refreshTokenRow.value!.release(),
-      user: user.serialize()
+    user.isOnline = true
+    user.lastSeenAt = DateTime.now()
+    await user.save()
+
+    // Emit tokens to the web client
+    RealtimeService.emitToRoom(session.sessionId, 'qr:confirmed', {
+      accessToken: tokens.value!.release(),
+      refreshToken: refreshToken.value!.release(),
+      user: user.serialize(),
     })
 
-    QrSessionService.removeSession(qrSessionId)
+    QrLoginService.deleteSession(sessionId)
 
-    return response.ok({ message: 'Login confirmed successfully' })
+    return ApiResponse.ok(response, 'Login confirmed.', null)
   }
 
-  // POST /api/v1/qr-login/reject
-  // Mobile calls this if user rejects
+  /**
+   * @reject
+   * @operationId rejectQrLogin
+   * @description Mobile app rejects the login.
+   * @requestBody {"sessionId": "string"}
+   * @responseBody 200 - {"success": true, "message": "string", "data": {}}
+   */
   public async reject({ request, response, auth }: HttpContext) {
-    const { qrSessionId } = request.only(['qrSessionId'])
-    
-    const session = QrSessionService.getSession(qrSessionId)
+    const { sessionId } = request.only(['sessionId'])
+    const user = auth.getUserOrFail()
+    const session = QrLoginService.getSession(sessionId)
+
     if (!session) {
-      return response.badRequest({ message: 'QR session expired or invalid' })
+      return ApiResponse.error(response, 404, 'QR session not found or expired.')
     }
 
-    QrSessionService.updateSession(qrSessionId, { status: 'pending' })
-    
-    realtimeService.io.to(`qr:${qrSessionId}`).emit('qr:rejected', {})
+    if (session.scannedByUserId !== user.id) {
+      return ApiResponse.error(response, 403, 'Unauthorized to reject this session.')
+    }
 
-    return response.ok({ message: 'QR login rejected' })
+    // Notify web client
+    RealtimeService.emitToRoom(session.sessionId, 'qr:rejected', null)
+
+    // Delete the session
+    QrLoginService.deleteSession(sessionId)
+
+    return ApiResponse.ok(response, 'Login rejected.', null)
   }
 }
