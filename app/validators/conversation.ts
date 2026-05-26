@@ -19,6 +19,7 @@ export const updateGroupSettingsValidator = vine.compile(
   vine.object({
     name: vine.string().trim().minLength(1).maxLength(100).optional(),
     comments_restricted: vine.boolean().optional(),
+    approve_members: vine.boolean().optional(),
   })
 )
 

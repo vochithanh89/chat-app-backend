@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon'
 import db from '@adonisjs/lucid/services/db'
+import logger from '@adonisjs/core/services/logger'
 import Conversation from '#models/conversation'
 import ConversationMember from '#models/conversation_member'
 import Message from '#models/message'
@@ -57,6 +58,7 @@ export interface CreateMessageInput {
   content?: string
   replyToMessageId?: number
   attachmentIds?: number[]
+  skipAiTrigger?: boolean
 }
 
 class MessageService {
@@ -72,7 +74,7 @@ class MessageService {
   }
 
   async createMessage(input: CreateMessageInput): Promise<Message> {
-    const { conversationId, senderId, content, replyToMessageId, attachmentIds } = input
+    const { conversationId, senderId, content, replyToMessageId, attachmentIds, skipAiTrigger } = input
 
     if (!content && (!attachmentIds || attachmentIds.length === 0)) {
       throw Object.assign(new Error('Message must have content or attachments.'), { status: 400 })
@@ -123,6 +125,13 @@ class MessageService {
           data: { type: 'message', conversationId: String(conversationId) },
         })
         .catch(() => {})
+    }
+
+    // Trigger AI chatbot reply in background if not skipped
+    if (!skipAiTrigger) {
+      this.triggerAiBotReplyIfNeeded(conversationId, senderId, content).catch((err) => {
+        logger.error({ err }, 'Failed to trigger background AI bot reply')
+      })
     }
 
     return message
@@ -281,6 +290,44 @@ class MessageService {
         emoji: r.emoji,
       })),
       poll: pollPayload,
+    }
+  }
+
+  /** Triggers the AI bot reply in the background for direct AI conversations. */
+  async triggerAiBotReplyIfNeeded(conversationId: number, senderId: number, content?: string) {
+    if (!content) return
+
+    // Load chatbot service dynamically to prevent circular dependencies
+    const { default: chatbot } = await import('#services/chatbot_service')
+    if (!chatbot.isEnabled()) return
+
+    const bot = await chatbot.getBotUser()
+    if (senderId === bot.id) return // Don't reply to self
+
+    // Verify if the bot is in this conversation
+    const botMember = await ConversationMember.query()
+      .where('conversation_id', conversationId)
+      .andWhere('user_id', bot.id)
+      .first()
+
+    if (!botMember) return
+
+    // Only auto-reply in direct 1-1 chats
+    const conv = await Conversation.find(conversationId)
+    if (!conv || conv.type !== 'direct') return
+
+    try {
+      const reply = await chatbot.generateReply(conversationId, content)
+      
+      // Save and broadcast the AI message
+      await this.createMessage({
+        conversationId,
+        senderId: bot.id,
+        content: reply,
+        skipAiTrigger: true, // Prevent infinite loops!
+      })
+    } catch (err: any) {
+      logger.error({ err }, 'Error during background AI response generation')
     }
   }
 }

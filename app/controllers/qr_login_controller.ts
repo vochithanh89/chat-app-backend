@@ -49,11 +49,11 @@ export default class QrLoginController {
     })
 
     // Emit to web that QR was scanned
-    RealtimeService.emitToRoom(session.sessionId, 'qr:scanned', {
+    RealtimeService.emitToRoom(`qr:${session.sessionId}`, 'qr:scanned', {
       user: user.serialize(),
     })
 
-    return ApiResponse.ok(response, 'QR code scanned.', null)
+    return ApiResponse.ok(response, 'QR code scanned.', { sessionId: session.sessionId })
   }
 
   /**
@@ -85,16 +85,16 @@ export default class QrLoginController {
     }
 
     // Generate token for Web
-    const tokens = await User.accessTokens.create(user, ['*'], { name: 'web_qr_login' })
-    const refreshToken = await User.refreshTokens.create(user, { name: 'web_qr_login' })
+    const tokens = await auth.use('jwt').generate(user)
+    const refreshToken = await User.refreshTokens.create(user, { name: 'web_qr_login' } as any)
 
     user.isOnline = true
     user.lastSeenAt = DateTime.now()
     await user.save()
 
     // Emit tokens to the web client
-    RealtimeService.emitToRoom(session.sessionId, 'qr:confirmed', {
-      accessToken: tokens.value!.release(),
+    RealtimeService.emitToRoom(`qr:${session.sessionId}`, 'qr:confirmed', {
+      accessToken: (tokens as any).token,
       refreshToken: refreshToken.value!.release(),
       user: user.serialize(),
     })
@@ -125,7 +125,7 @@ export default class QrLoginController {
     }
 
     // Notify web client
-    RealtimeService.emitToRoom(session.sessionId, 'qr:rejected', null)
+    RealtimeService.emitToRoom(`qr:${session.sessionId}`, 'qr:rejected', null)
 
     // Delete the session
     QrLoginService.deleteSession(sessionId)

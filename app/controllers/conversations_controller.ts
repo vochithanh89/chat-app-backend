@@ -8,6 +8,7 @@ import Friendship from '#models/friendship'
 import Message from '#models/message'
 import User from '#models/user'
 import UserBlock from '#models/user_block'
+import GroupJoinRequest from '#models/group_join_request'
 import { ApiResponse } from '#utils/api_response'
 import {
   createDirectConversationValidator,
@@ -24,6 +25,7 @@ import { updateAvatarValidator } from '#validators/update_avatar'
 import messageService from '#services/message_service'
 import realtimeService from '#services/realtime_service'
 import s3Service from '#services/s3_service'
+import chatbot from '#services/chatbot_service'
 
 /** Resolve a conversation by its public UUID. */
 async function resolveByUuid(uuid: string) {
@@ -222,6 +224,7 @@ export default class ConversationsController {
       const conv = await Conversation.query()
         .where('id', existing.id)
         .preload('members', (q) => q.preload('user'))
+        .preload('messages', (q) => q.orderBy('id', 'desc').limit(1))
         .firstOrFail()
       return ApiResponse.ok(response, 'OK', { conversation: conv })
     }
@@ -329,16 +332,32 @@ export default class ConversationsController {
    */
   public async list({ response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
+    
+    // Clean up duplicate AI conversations and messages older than 24 hours
+    await chatbot.cleanupAiConversations(me.id)
+
     const memberships = await ConversationMember.query().where('user_id', me.id)
     const ids = memberships.map((m) => m.conversationId)
     if (ids.length === 0) return ApiResponse.ok(response, 'OK', { conversations: [] })
 
+    // Exclude the AI bot's conversation ID from the general list
+    const bot = await chatbot.getBotUser()
+    const botConvIds = await db
+      .from('conversation_members')
+      .where('user_id', bot.id)
+      .select('conversation_id')
+    const botConvIdSet = new Set(botConvIds.map((row) => row.conversation_id))
+    const filteredIds = ids.filter((id) => !botConvIdSet.has(id))
+
+    if (filteredIds.length === 0) return ApiResponse.ok(response, 'OK', { conversations: [] })
+
     const convs = await Conversation.query()
-      .whereIn('id', ids)
+      .whereIn('id', filteredIds)
       .preload('members', (q) => q.preload('user'))
+      .preload('messages', (q) => q.orderBy('id', 'desc').limit(1))
       .orderBy('last_message_at', 'desc')
 
-    const unreadMap = await computeUnreadCounts(me.id, ids)
+    const unreadMap = await computeUnreadCounts(me.id, filteredIds)
     const { blockedByMe, blockedByOther } = await computeDirectBlockStatus(me.id, convs)
     const friendshipMap = await computeDirectFriendshipStatus(me.id, convs)
     const out = convs.map((c) => {
@@ -378,6 +397,7 @@ export default class ConversationsController {
     const conv = await Conversation.query()
       .where('id', base.id)
       .preload('members', (q) => q.preload('user'))
+      .preload('messages', (q) => q.orderBy('id', 'desc').limit(1))
       .firstOrFail()
 
     const unreadMap = await computeUnreadCounts(me.id, [conv.id])
@@ -414,8 +434,8 @@ export default class ConversationsController {
       return ApiResponse.error(response, 400, 'Only group conversations support adding members.')
     }
     const myMember = await messageService.assertMember(conv.id, me.id)
-    if (!myMember || (myMember.role !== 'owner' && myMember.role !== 'admin')) {
-      return ApiResponse.error(response, 403, 'Only owner or admin can add members.')
+    if (!myMember) {
+      return ApiResponse.error(response, 403, 'Not a member of this conversation.')
     }
 
     const { user_ids: userUuids } = await request.validateUsing(addMembersValidator)
@@ -844,11 +864,14 @@ export default class ConversationsController {
     if (!myMember || (myMember.role !== 'owner' && myMember.role !== 'admin')) {
       return ApiResponse.error(response, 403, 'Only owner or admin can change settings.')
     }
-    const { comments_restricted: commentsRestricted, name } = await request.validateUsing(
+    const { comments_restricted: commentsRestricted, name, approve_members: approveMembers } = await request.validateUsing(
       updateGroupSettingsValidator
     )
     if (commentsRestricted !== undefined) {
       conv.commentsRestricted = commentsRestricted
+    }
+    if (approveMembers !== undefined) {
+      conv.approveMembers = approveMembers
     }
     if (name !== undefined) {
       conv.name = name
@@ -916,16 +939,127 @@ export default class ConversationsController {
       .andWhere('user_id', me.id)
       .first()
 
+    if (existing) {
+      await conv.load('members', (q) => q.preload('user'))
+      return ApiResponse.ok(response, 'Already a member.', {
+        conversation: conv,
+      })
+    }
+
+    // If approval is required
+    if (conv.approveMembers) {
+      const pendingRequest = await GroupJoinRequest.query()
+        .where('conversation_id', conv.id)
+        .andWhere('user_id', me.id)
+        .andWhere('status', 'pending')
+        .first()
+
+      if (pendingRequest) {
+        return ApiResponse.ok(response, 'Waiting approval.', {
+          status: 'pending',
+          message: 'Yêu cầu tham gia của bạn đang chờ phê duyệt từ quản trị viên.',
+        })
+      }
+
+      await GroupJoinRequest.create({
+        conversationId: conv.id,
+        userId: me.id,
+        status: 'pending',
+      })
+
+      return ApiResponse.ok(response, 'Waiting approval.', {
+        status: 'pending',
+        message: 'Yêu cầu tham gia của bạn đã được gửi và đang chờ phê duyệt từ quản trị viên.',
+      })
+    }
+
+    await ConversationMember.create({
+      conversationId: conv.id,
+      userId: me.id,
+      role: 'member',
+      joinedAt: DateTime.now(),
+    })
+
+    await realtimeService.joinUserToConversation(me.id, conv)
+    realtimeService.emitToUser(me.id, 'conversation:joined', {
+      conversationId: conv.uuid,
+    })
+    realtimeService.emitToConversation(conv.id, 'conversation:members-changed', {
+      conversationId: conv.uuid,
+    })
+
+    await conv.load('members', (q) => q.preload('user'))
+    return ApiResponse.ok(response, 'Joined group.', {
+      conversation: conv,
+    })
+  }
+
+  /**
+   * @getJoinRequests
+   * @operationId getJoinRequests
+   * @description Get list of pending group join requests (owner or admin only).
+   */
+  public async getJoinRequests({ params, response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const conv = await resolveByUuid(params.id)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
+
+    // Must be group owner or admin
+    const myMember = await messageService.assertMember(conv.id, me.id)
+    if (!myMember || (myMember.role !== 'owner' && myMember.role !== 'admin')) {
+      return ApiResponse.error(response, 403, 'Only owner or admin can view join requests.')
+    }
+
+    const requests = await GroupJoinRequest.query()
+      .where('conversation_id', conv.id)
+      .andWhere('status', 'pending')
+      .preload('user')
+
+    return ApiResponse.ok(response, 'Join requests retrieved.', requests)
+  }
+
+  /**
+   * @approveJoinRequest
+   * @operationId approveJoinRequest
+   * @description Approve a pending group join request (owner or admin only).
+   */
+  public async approveJoinRequest({ params, response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const conv = await resolveByUuid(params.id)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
+
+    // Must be group owner or admin
+    const myMember = await messageService.assertMember(conv.id, me.id)
+    if (!myMember || (myMember.role !== 'owner' && myMember.role !== 'admin')) {
+      return ApiResponse.error(response, 403, 'Only owner or admin can approve requests.')
+    }
+
+    const requestObj = await GroupJoinRequest.find(params.requestId)
+    if (!requestObj || requestObj.conversationId !== conv.id || requestObj.status !== 'pending') {
+      return ApiResponse.error(response, 404, 'Join request not found or not pending.')
+    }
+
+    // Update request status
+    requestObj.status = 'approved'
+    await requestObj.save()
+
+    // Add to members if not already
+    const existing = await ConversationMember.query()
+      .where('conversation_id', conv.id)
+      .andWhere('user_id', requestObj.userId)
+      .first()
+
     if (!existing) {
       await ConversationMember.create({
         conversationId: conv.id,
-        userId: me.id,
+        userId: requestObj.userId,
         role: 'member',
         joinedAt: DateTime.now(),
       })
 
-      await realtimeService.joinUserToConversation(me.id, conv)
-      realtimeService.emitToUser(me.id, 'conversation:joined', {
+      // Realtime trigger
+      await realtimeService.joinUserToConversation(requestObj.userId, conv)
+      realtimeService.emitToUser(requestObj.userId, 'conversation:joined', {
         conversationId: conv.uuid,
       })
       realtimeService.emitToConversation(conv.id, 'conversation:members-changed', {
@@ -933,9 +1067,34 @@ export default class ConversationsController {
       })
     }
 
-    await conv.load('members', (q) => q.preload('user'))
-    return ApiResponse.ok(response, existing ? 'Already a member.' : 'Joined group.', {
-      conversation: conv,
-    })
+    return ApiResponse.ok(response, 'Join request approved.', null)
+  }
+
+  /**
+   * @rejectJoinRequest
+   * @operationId rejectJoinRequest
+   * @description Reject a pending group join request (owner or admin only).
+   */
+  public async rejectJoinRequest({ params, response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const conv = await resolveByUuid(params.id)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
+
+    // Must be group owner or admin
+    const myMember = await messageService.assertMember(conv.id, me.id)
+    if (!myMember || (myMember.role !== 'owner' && myMember.role !== 'admin')) {
+      return ApiResponse.error(response, 403, 'Only owner or admin can reject requests.')
+    }
+
+    const requestObj = await GroupJoinRequest.find(params.requestId)
+    if (!requestObj || requestObj.conversationId !== conv.id || requestObj.status !== 'pending') {
+      return ApiResponse.error(response, 404, 'Join request not found or not pending.')
+    }
+
+    // Update request status
+    requestObj.status = 'rejected'
+    await requestObj.save()
+
+    return ApiResponse.ok(response, 'Join request rejected.', null)
   }
 }

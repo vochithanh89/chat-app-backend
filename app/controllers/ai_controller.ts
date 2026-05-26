@@ -3,6 +3,7 @@ import { DateTime } from 'luxon'
 import db from '@adonisjs/lucid/services/db'
 import Conversation from '#models/conversation'
 import ConversationMember from '#models/conversation_member'
+import Message from '#models/message'
 import { ApiResponse } from '#utils/api_response'
 import { aiChatValidator } from '#validators/ai'
 import chatbot from '#services/chatbot_service'
@@ -22,6 +23,10 @@ export default class AiController {
       return ApiResponse.error(response, 503, 'AI is disabled. Configure GEMINI_API_KEY.')
     }
     const me = auth.use('jwt').getUserOrFail()
+    
+    // Clean up duplicate AI conversations and messages older than 24 hours
+    await chatbot.cleanupAiConversations(me.id)
+    
     const bot = await chatbot.getBotUser()
 
     const existing = await db
@@ -34,28 +39,29 @@ export default class AiController {
       .andWhere('m2.user_id', bot.id)
       .first()
 
+    let conv: Conversation
     if (existing) {
-      const conv = await Conversation.query()
+      conv = await Conversation.query()
         .where('id', existing.id)
         .preload('members', (q) => q.preload('user'))
         .firstOrFail()
-      return ApiResponse.ok(response, 'OK', { conversation: conv })
+    } else {
+      conv = await db.transaction(async (trx) => {
+        const c = await Conversation.create({ type: 'direct', createdBy: me.id }, { client: trx })
+        await ConversationMember.createMany(
+          [
+            { conversationId: c.id, userId: me.id, role: 'member', joinedAt: DateTime.now() },
+            { conversationId: c.id, userId: bot.id, role: 'member', joinedAt: DateTime.now() },
+          ],
+          { client: trx }
+        )
+        return c
+      })
+      await conv.load('members', (q) => q.preload('user'))
     }
 
-    const conv = await db.transaction(async (trx) => {
-      const c = await Conversation.create({ type: 'direct', createdBy: me.id }, { client: trx })
-      await ConversationMember.createMany(
-        [
-          { conversationId: c.id, userId: me.id, role: 'member', joinedAt: DateTime.now() },
-          { conversationId: c.id, userId: bot.id, role: 'member', joinedAt: DateTime.now() },
-        ],
-        { client: trx }
-      )
-      return c
-    })
-
-    await conv.load('members', (q) => q.preload('user'))
-    return ApiResponse.created(response, 'AI conversation started.', { conversation: conv })
+    await chatbot.ensureGreetingMessage(conv.id)
+    return ApiResponse.ok(response, 'AI conversation started.', { conversation: conv })
   }
 
   /**
@@ -68,24 +74,52 @@ export default class AiController {
       return ApiResponse.error(response, 503, 'AI is disabled. Configure GEMINI_API_KEY.')
     }
     const me = auth.use('jwt').getUserOrFail()
+    
+    // Clean up first
+    await chatbot.cleanupAiConversations(me.id)
+    
     const bot = await chatbot.getBotUser()
 
-    const conv = await db.transaction(async (trx) => {
-      const c = await Conversation.create({ type: 'direct', createdBy: me.id }, { client: trx })
-      await ConversationMember.createMany(
-        [
-          { conversationId: c.id, userId: me.id, role: 'member', joinedAt: DateTime.now() },
-          { conversationId: c.id, userId: bot.id, role: 'member', joinedAt: DateTime.now() },
-        ],
-        { client: trx }
-      )
-      return c
-    })
+    const existing = await db
+      .from('conversations as c')
+      .select('c.id')
+      .join('conversation_members as m1', 'm1.conversation_id', 'c.id')
+      .join('conversation_members as m2', 'm2.conversation_id', 'c.id')
+      .where('c.type', 'direct')
+      .andWhere('m1.user_id', me.id)
+      .andWhere('m2.user_id', bot.id)
+      .first()
 
-    await conv.load('members', (q) => q.preload('user'))
+    let conv: Conversation
+    if (existing) {
+      conv = await Conversation.query()
+        .where('id', existing.id)
+        .preload('members', (q) => q.preload('user'))
+        .firstOrFail()
+      // Delete all messages to start fresh
+      await Message.query().where('conversation_id', conv.id).delete()
+    } else {
+      conv = await db.transaction(async (trx) => {
+        const c = await Conversation.create({ type: 'direct', createdBy: me.id }, { client: trx })
+        await ConversationMember.createMany(
+          [
+            { conversationId: c.id, userId: me.id, role: 'member', joinedAt: DateTime.now() },
+            { conversationId: c.id, userId: bot.id, role: 'member', joinedAt: DateTime.now() },
+          ],
+          { client: trx }
+        )
+        return c
+      })
+      await conv.load('members', (q) => q.preload('user'))
+    }
+
     // Realtime: join sockets and notify the current user's sidebars so
     // the new conversation appears immediately without a full refresh.
     await realtimeService.joinUserToConversation(me.id, conv)
+    
+    // Ensure greeting message is present
+    await chatbot.ensureGreetingMessage(conv.id)
+    
     realtimeService.emitToUser(me.id, 'conversation:joined', { conversationId: conv.uuid })
     return ApiResponse.created(response, 'New AI conversation started.', { conversation: conv })
   }
@@ -104,6 +138,10 @@ export default class AiController {
       return ApiResponse.error(response, 503, 'AI is disabled. Configure GEMINI_API_KEY.')
     }
     const me = auth.use('jwt').getUserOrFail()
+    
+    // Clean up first
+    await chatbot.cleanupAiConversations(me.id)
+    
     const { conversation_id: conversationUuid, content } =
       await request.validateUsing(aiChatValidator)
 
@@ -124,6 +162,7 @@ export default class AiController {
       conversationId,
       senderId: me.id,
       content,
+      skipAiTrigger: true,
     })
 
     let reply: string
@@ -144,6 +183,7 @@ export default class AiController {
       conversationId,
       senderId: bot.id,
       content: reply,
+      skipAiTrigger: true,
     })
 
     return ApiResponse.ok(response, 'OK', {

@@ -32,6 +32,28 @@ class RealtimeService {
   private io: IOServer | null = null
   /** userId → count of currently open sockets for that user. */
   private connections = new Map<number, number>()
+  private userPrivacySettings = new Map<number, boolean>()
+
+  public setPrivacyInMemory(userId: number, isPrivate: boolean): void {
+    this.userPrivacySettings.set(userId, isPrivate)
+  }
+
+  public isUserPrivate(userId: number): boolean {
+    return this.userPrivacySettings.get(userId) === true
+  }
+
+  public hasConnections(userId: number): boolean {
+    const count = this.connections.get(userId) ?? 0
+    return count > 0
+  }
+
+  public async broadcastOffline(userId: number): Promise<void> {
+    await this.markOnline(userId, false)
+  }
+
+  public async broadcastOnline(userId: number): Promise<void> {
+    await this.markOnline(userId, true)
+  }
 
   attach(httpServer: HttpServer): void {
     if (this.io) return
@@ -108,6 +130,32 @@ class RealtimeService {
           void this.markOnline(userId, false)
         } else {
           this.connections.set(userId, next)
+        }
+      })
+
+      // Check privacy mode from handshake or database
+      const handshakePrivate = socket.handshake.auth?.is_private === true || socket.handshake.auth?.is_private === 'true'
+      if (handshakePrivate) {
+        this.userPrivacySettings.set(userId, true)
+      } else if (!this.userPrivacySettings.has(userId)) {
+        User.find(userId).then(async (user) => {
+          if (user && user.isPrivatePresence) {
+            this.userPrivacySettings.set(userId, true)
+            // Sync status to offline if it was marked online during this connection step
+            await this.markOnline(userId, false)
+          }
+        }).catch((err) => {
+          logger.warn({ err, userId }, 'Failed to fetch privacy settings in DB')
+        })
+      }
+
+      socket.on('presence:toggle_privacy', async (data: { isPrivate: boolean }) => {
+        const isPrivate = !!data?.isPrivate
+        this.userPrivacySettings.set(userId, isPrivate)
+        if (isPrivate) {
+          await this.markOnline(userId, false)
+        } else {
+          await this.markOnline(userId, true)
         }
       })
 
@@ -312,8 +360,14 @@ class RealtimeService {
     try {
       const user = await User.find(userId)
       if (!user) return
-      user.isOnline = online
-      user.lastSeenAt = DateTime.now()
+
+      const isPrivate = this.isUserPrivate(userId) || !!user.isPrivatePresence
+      const targetOnline = isPrivate ? false : online
+
+      user.isOnline = targetOnline
+      if (!isPrivate) {
+        user.lastSeenAt = DateTime.now()
+      }
       await user.save()
 
       // Let interested clients know. Broadcast globally for now — it's a
@@ -322,7 +376,7 @@ class RealtimeService {
       if (this.io) {
         this.io.emit('presence:changed', {
           userId: user.uuid,
-          isOnline: online,
+          isOnline: targetOnline,
           lastSeenAt: user.lastSeenAt,
         })
       }

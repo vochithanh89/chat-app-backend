@@ -63,6 +63,7 @@ router
       .group(() => {
         router.get('/user/me', [UsersController, 'me']).as('users.me')
         router.put('/user/profile', [UsersController, 'updateProfile']).as('users.updateProfile')
+        router.put('/user/privacy', [UsersController, 'updatePrivacySettings']).as('users.updatePrivacySettings')
         router.put('/user/avatar', [UsersController, 'updateAvatar']).as('users.updateAvatar')
         router.post('/user/heartbeat', [UsersController, 'heartbeat']).as('users.heartbeat')
         router.post('/user/offline', [UsersController, 'goOffline']).as('users.offline')
@@ -159,6 +160,15 @@ router
         router
           .post('/conversations/join', [ConversationsController, 'joinByCode'])
           .as('conversations.joinByCode')
+        router
+          .get('/conversations/:id/join-requests', [ConversationsController, 'getJoinRequests'])
+          .as('conversations.getJoinRequests')
+        router
+          .post('/conversations/:id/join-requests/:requestId/approve', [ConversationsController, 'approveJoinRequest'])
+          .as('conversations.approveJoinRequest')
+        router
+          .post('/conversations/:id/join-requests/:requestId/reject', [ConversationsController, 'rejectJoinRequest'])
+          .as('conversations.rejectJoinRequest')
 
         // Polls
         router

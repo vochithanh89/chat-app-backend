@@ -3,6 +3,7 @@ import type { HttpContext } from '@adonisjs/core/http'
 import { DateTime } from 'luxon'
 import Conversation from '#models/conversation'
 import Message from '#models/message'
+import db from '@adonisjs/lucid/services/db'
 import MessageAttachment, { type AttachmentType } from '#models/message_attachment'
 import MessageReaction from '#models/message_reaction'
 import MessageDeletion from '#models/message_deletion'
@@ -18,6 +19,7 @@ import {
 import messageService from '#services/message_service'
 import realtime from '#services/realtime_service'
 import s3Service from '#services/s3_service'
+import chatbot from '#services/chatbot_service'
 
 function detectAttachmentType(extname: string): AttachmentType {
   const ext = extname.toLowerCase()
@@ -50,11 +52,26 @@ export default class MessagesController {
    */
   public async list({ params, request, response, auth }: HttpContext) {
     const me = auth.use('jwt').getUserOrFail()
+    
+    // Clean up duplicate AI conversations and messages older than 24 hours
+    await chatbot.cleanupAiConversations(me.id)
+    
     const conv = await resolveConversationByUuid(params.conversationId)
     if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
     const conversationId = conv.id
     const member = await messageService.assertMember(conversationId, me.id)
     if (!member) return ApiResponse.error(response, 403, 'Not a member.')
+
+    // Ensure AI conversation has a greeting message if empty
+    const bot = await chatbot.getBotUser()
+    const isAi = await db
+      .from('conversation_members')
+      .where('conversation_id', conversationId)
+      .where('user_id', bot.id)
+      .first()
+    if (isAi) {
+      await chatbot.ensureGreetingMessage(conversationId)
+    }
 
     const { before, limit = 30 } = await request.validateUsing(listMessagesValidator, {
       data: request.qs(),

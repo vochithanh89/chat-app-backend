@@ -63,6 +63,9 @@ export default class User extends compose(BaseModel, AuthFinder) {
   declare lastSeenAt: DateTime | null
 
   @column()
+  declare isPrivatePresence: boolean
+
+  @column()
   declare isAdmin: boolean
 
   @column()

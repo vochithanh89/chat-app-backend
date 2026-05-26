@@ -10,10 +10,15 @@ export default class TrackPresenceMiddleware {
   async handle(ctx: HttpContext, next: NextFn) {
     const user = ctx.auth?.user
     if (user) {
-      user.isOnline = true
-      user.lastSeenAt = DateTime.now()
-      // Avoid blocking the request — fire and forget.
-      user.save().catch(() => {})
+      if (!user.isPrivatePresence) {
+        user.isOnline = true
+        user.lastSeenAt = DateTime.now()
+        // Avoid blocking the request — fire and forget.
+        user.save().catch(() => {})
+      } else if (user.isOnline) {
+        user.isOnline = false
+        user.save().catch(() => {})
+      }
     }
     return next()
   }

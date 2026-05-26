@@ -65,6 +65,36 @@ export default class UsersController {
   }
 
   /**
+   * @updatePrivacySettings
+   * @operationId updateUserPrivacySettings
+   * @description Updates the authenticated user's privacy settings.
+   * @requestBody {"isPrivatePresence": "boolean"}
+   * @responseBody 200 - {"success": true, "message": "string", "data": {"user": "User"}}
+   */
+  public async updatePrivacySettings({ request, response, auth }: HttpContext) {
+    const user = auth.use('jwt').getUserOrFail()
+    const isPrivate = !!request.input('isPrivatePresence')
+    user.isPrivatePresence = isPrivate
+    if (isPrivate) {
+      user.isOnline = false
+    }
+    await user.save()
+
+    const { default: realtimeService } = await import('#services/realtime_service')
+    realtimeService.setPrivacyInMemory(user.id, isPrivate)
+    if (isPrivate) {
+      await realtimeService.broadcastOffline(user.id)
+    } else {
+      const hasConnections = realtimeService.hasConnections(user.id)
+      if (hasConnections) {
+        await realtimeService.broadcastOnline(user.id)
+      }
+    }
+
+    return ApiResponse.ok(response, 'Privacy settings updated.', { user: user.serialize() })
+  }
+
+  /**
    * @updateAvatar
    * @operationId updateUserAvatar
    * @description Uploads and updates the authenticated user's avatar image.
@@ -141,6 +171,7 @@ export default class UsersController {
 
     const query = User.query()
       .whereNot('id', me.id)
+      .where('email', '!=', 'ai-bot@system.local')
       // Exclude users I've blocked
       .whereNotExists((sub) => {
         sub

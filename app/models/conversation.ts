@@ -37,6 +37,9 @@ export default class Conversation extends BaseModel {
   declare commentsRestricted: boolean
 
   @column()
+  declare approveMembers: boolean
+
+  @column()
   declare inviteCode: string | null
 
   @column.dateTime()
