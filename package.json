@@ -67,6 +67,7 @@
     "luxon": "^3.7.2",
     "mysql2": "^3.16.1",
     "reflect-metadata": "^0.2.2",
+    "resend": "^6.12.3",
     "socket.io": "^4.8.3",
     "ts-node": "^10.9.2"
   },
