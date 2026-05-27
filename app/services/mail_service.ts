@@ -5,7 +5,7 @@ const SMTP_HOST = env.get('SMTP_HOST')
 const SMTP_USERNAME = env.get('SMTP_USERNAME')
 
 const BREVO_API_KEY = env.get('BREVO_API_KEY') || ''
-const BREVO_SENDER_EMAIL = env.get('BREVO_SENDER_EMAIL') || SMTP_USERNAME || 'lenqvinh3010@gmail.com'
+const BREVO_SENDER_EMAIL = env.get('BREVO_SENDER_EMAIL') || SMTP_USERNAME || 'quangvinh7137@gmail.com'
 const BREVO_SENDER_NAME = env.get('BREVO_SENDER_NAME') || 'ChatApp Support'
 
 class MailService {
