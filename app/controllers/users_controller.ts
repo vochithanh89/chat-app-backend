@@ -1,5 +1,8 @@
 import User from '#models/user'
 import DeviceToken from '#models/device_token'
+import Conversation from '#models/conversation'
+import Message from '#models/message'
+import MessageAttachment from '#models/message_attachment'
 import { updateProfileValidator } from '#validators/update_profile'
 import { updateAvatarValidator } from '#validators/update_avatar'
 import { searchUsersValidator, registerDeviceTokenValidator } from '#validators/friendship'
@@ -255,5 +258,54 @@ export default class UsersController {
       await DeviceToken.query().where('user_id', me.id).andWhere('token', token).delete()
     }
     return ApiResponse.ok(response, 'Device token unregistered.', null)
+  }
+
+  /**
+   * @statistics
+   * @operationId getUserStatistics
+   * @description Returns real activity statistics for the authenticated user.
+   * @responseBody 200 - {"success": true, "message": "string", "data": {"chats": number, "calls": number, "documents": number, "groups": number}}
+   */
+  public async statistics({ auth, response }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+
+    // 1. Chats (direct 1-1 chats): conversations of type 'direct' where me.id is a member
+    const chats = await Conversation.query()
+      .where('type', 'direct')
+      .whereExists((sub) => {
+        sub
+          .from('conversation_members')
+          .whereRaw('conversation_members.conversation_id = conversations.id')
+          .andWhere('conversation_members.user_id', me.id)
+      })
+
+    // 2. Groups (group chats): conversations of type 'group' where me.id is a member
+    const groups = await Conversation.query()
+      .where('type', 'group')
+      .whereExists((sub) => {
+        sub
+          .from('conversation_members')
+          .whereRaw('conversation_members.conversation_id = conversations.id')
+          .andWhere('conversation_members.user_id', me.id)
+      })
+
+    // 3. Calls (calls sent by the user containing 📞 or "Cuộc gọi")
+    const calls = await Message.query()
+      .where('senderId', me.id)
+      .where((sub) => {
+        sub.where('content', 'like', '%📞%').orWhere('content', 'like', '%Cuộc gọi%')
+      })
+
+    // 4. Documents (attachments uploaded by me.id with type 'document')
+    const documents = await MessageAttachment.query()
+      .where('uploadedBy', me.id)
+      .where('type', 'document')
+
+    return ApiResponse.ok(response, 'OK', {
+      chats: chats.length,
+      calls: calls.length,
+      documents: documents.length,
+      groups: groups.length,
+    })
   }
 }

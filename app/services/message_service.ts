@@ -117,11 +117,30 @@ class MessageService {
     const otherMembers = await ConversationMember.query()
       .where('conversation_id', conversationId)
       .andWhereNot('user_id', senderId)
+
+    let pushTitle = 'New message'
+    let pushBody = content?.slice(0, 120) ?? '[attachment]'
+    if (content?.startsWith('__system__:')) {
+      const parts = content.split(':')
+      const action = parts[1]
+      const actorName = message.sender?.name || 'Thành viên'
+      if (action === 'joined') {
+        pushBody = `${actorName} đã tham gia nhóm`
+      } else if (action === 'left') {
+        pushBody = `${actorName} đã rời nhóm`
+      } else if (action === 'added') {
+        pushBody = `${actorName} đã thêm ${parts[3] || 'thành viên'} vào nhóm`
+      } else if (action === 'removed') {
+        pushBody = `${actorName} đã xóa ${parts[3] || 'thành viên'} khỏi nhóm`
+      }
+      pushTitle = 'Thông báo nhóm'
+    }
+
     for (const m of otherMembers) {
       notificationService
         .sendToUser(m.userId, {
-          title: 'New message',
-          body: content?.slice(0, 120) ?? '[attachment]',
+          title: pushTitle,
+          body: pushBody,
           data: { type: 'message', conversationId: String(conversationId) },
         })
         .catch(() => {})

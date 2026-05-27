@@ -81,7 +81,7 @@ export default class QrLoginController {
     }
 
     if (user.accountStatus === 'locked') {
-        return ApiResponse.error(response, 403, 'Your account has been locked. Contact support.')
+        return ApiResponse.error(response, 403, 'tài khoản của bạn đã bị khóa, hãy liên hệ với hỗ trợ viên để được mở khóa. tài khoản hỗ trợ viên: chatappN7@support.com')
     }
 
     // Generate token for Web

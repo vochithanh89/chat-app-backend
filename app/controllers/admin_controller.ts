@@ -8,6 +8,7 @@ import Report from '#models/report'
 import { ApiResponse } from '#utils/api_response'
 import { updateUserStatusValidator, statsRangeValidator } from '#validators/admin'
 import { updateReportStatusValidator } from '#validators/report'
+import realtimeService from '#services/realtime_service'
 
 function rangeStart(
   period: 'day' | 'week' | 'month',
@@ -210,7 +211,22 @@ export default class AdminController {
     if (!user) return ApiResponse.error(response, 404, 'User not found.')
     const { status } = await request.validateUsing(updateUserStatusValidator)
     user.accountStatus = status
-    await user.save()
+
+    if (status === 'locked') {
+      const allTokens = await User.refreshTokens.all(user)
+      for (const t of allTokens) {
+        await User.refreshTokens.delete(user, (t as any).identifier)
+      }
+      user.isOnline = false
+      await user.save()
+
+      realtimeService.emitToUser(user.id, 'auth:account_locked', {
+        message: 'tài khoản của bạn đã bị khóa, hãy liên hệ với hỗ trợ viên để được mở khóa. tài khoản hỗ trợ viên: chatappN7@support.com',
+      })
+    } else {
+      await user.save()
+    }
+
     return ApiResponse.ok(response, 'User status updated.', { user })
   }
 
@@ -231,8 +247,72 @@ export default class AdminController {
     const query = Report.query().preload('reporter').orderBy('id', 'desc')
     if (status) query.where('status', status)
     const result = await query.paginate(page, limit)
+
+    const reports = result.all()
+    const userIds = new Set<number>()
+    const messageIds = new Set<number>()
+
+    for (const r of reports) {
+      if (r.targetType === 'user') {
+        userIds.add(r.targetId)
+      } else if (r.targetType === 'message') {
+        messageIds.add(r.targetId)
+      }
+    }
+
+    const users = userIds.size > 0 ? await User.query().whereIn('id', Array.from(userIds)) : []
+    const messages = messageIds.size > 0 ? await Message.query().preload('sender').whereIn('id', Array.from(messageIds)) : []
+
+    const userMap = new Map(users.map((u) => [u.id, u]))
+    const messageMap = new Map(messages.map((m) => [m.id, m]))
+
+    const reportsWithTargets = reports.map((r) => {
+      let targetUser: any = null
+      let targetMessage: any = null
+
+      if (r.targetType === 'user') {
+        const u = userMap.get(r.targetId)
+        if (u) {
+          targetUser = {
+            id: u.uuid,
+            name: u.name,
+            email: u.email,
+          }
+        }
+      } else if (r.targetType === 'message') {
+        const m = messageMap.get(r.targetId)
+        if (m) {
+          targetMessage = {
+            id: m.uuid,
+            content: m.content,
+            sender: m.sender
+              ? {
+                  id: m.sender.uuid,
+                  name: m.sender.name,
+                  email: m.sender.email,
+                }
+              : null,
+          }
+          if (m.sender) {
+            targetUser = {
+              id: m.sender.uuid,
+              name: m.sender.name,
+              email: m.sender.email,
+            }
+          }
+        }
+      }
+
+      const json = r.toJSON()
+      return {
+        ...json,
+        targetUser,
+        targetMessage,
+      }
+    })
+
     return ApiResponse.ok(response, 'OK', {
-      reports: result.all(),
+      reports: reportsWithTargets,
       meta: result.getMeta(),
     })
   }

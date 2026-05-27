@@ -35,6 +35,12 @@ export default class ConversationMember extends BaseModel {
   @column()
   declare pinOrder: number | null
 
+  @column()
+  declare nickname: string | null
+
+  @column({ columnName: 'chat_background' })
+  declare chatBackground: string | null
+
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
 

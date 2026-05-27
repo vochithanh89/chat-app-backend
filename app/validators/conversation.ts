@@ -47,6 +47,12 @@ export const transferOwnershipValidator = vine.compile(
   })
 )
 
+export const updateMemberNicknameValidator = vine.compile(
+  vine.object({
+    nickname: vine.string().trim().maxLength(50).nullable().optional(),
+  })
+)
+
 export const markReadValidator = vine.compile(
   vine.object({
     // Optional — UUID of the latest message the client saw. Lets the

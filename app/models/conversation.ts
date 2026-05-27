@@ -45,6 +45,9 @@ export default class Conversation extends BaseModel {
   @column.dateTime()
   declare lastMessageAt: DateTime | null
 
+  @column({ columnName: 'chat_background' })
+  declare chatBackground: string | null
+
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
 

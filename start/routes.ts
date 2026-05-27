@@ -40,6 +40,9 @@ router
     router
       .post('/auth/forgot-password', [AuthController, 'forgotPassword'])
       .as('auth.forgotPassword')
+    router
+      .post('/auth/verify-reset-otp', [AuthController, 'verifyResetOtp'])
+      .as('auth.verifyResetOtp')
     router.post('/auth/reset-password', [AuthController, 'resetPassword']).as('auth.resetPassword')
 
     // QR Login Public
@@ -62,6 +65,7 @@ router
     router
       .group(() => {
         router.get('/user/me', [UsersController, 'me']).as('users.me')
+        router.get('/user/statistics', [UsersController, 'statistics']).as('users.statistics')
         router.put('/user/profile', [UsersController, 'updateProfile']).as('users.updateProfile')
         router.put('/user/privacy', [UsersController, 'updatePrivacySettings']).as('users.updatePrivacySettings')
         router.put('/user/avatar', [UsersController, 'updateAvatar']).as('users.updateAvatar')
@@ -131,6 +135,12 @@ router
           ])
           .as('conversations.updateMemberRole')
         router
+          .put('/conversations/:id/members/:userId/nickname', [
+            ConversationsController,
+            'updateMemberNickname',
+          ])
+          .as('conversations.updateMemberNickname')
+        router
           .post('/conversations/:id/transfer', [ConversationsController, 'transferOwnership'])
           .as('conversations.transferOwnership')
         router
@@ -142,6 +152,9 @@ router
         router
           .put('/conversations/:id/avatar', [ConversationsController, 'updateAvatar'])
           .as('conversations.updateAvatar')
+        router
+          .put('/conversations/:id/background', [ConversationsController, 'updateBackground'])
+          .as('conversations.updateBackground')
         router
           .post('/conversations/:id/mute', [ConversationsController, 'toggleMute'])
           .as('conversations.toggleMute')

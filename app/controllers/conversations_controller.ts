@@ -15,6 +15,7 @@ import {
   createGroupConversationValidator,
   addMembersValidator,
   updateMemberRoleValidator,
+  updateMemberNicknameValidator,
   transferOwnershipValidator,
   markReadValidator,
   joinByCodeValidator,
@@ -206,7 +207,60 @@ export default class ConversationsController {
     const otherId = other.id
 
     if (otherId === me.id) {
-      return ApiResponse.error(response, 400, 'Cannot create a conversation with yourself.')
+      const existing = await db
+        .from('conversations as c')
+        .select('c.id')
+        .where('c.type', 'direct')
+        .whereIn('c.id', (subQuery) => {
+          subQuery
+            .from('conversation_members')
+            .groupBy('conversation_id')
+            .havingRaw('count(user_id) = 1')
+            .select('conversation_id')
+        })
+        .whereIn('c.id', (subQuery) => {
+          subQuery
+            .from('conversation_members')
+            .where('user_id', me.id)
+            .select('conversation_id')
+        })
+        .first()
+
+      if (existing) {
+        const conv = await Conversation.query()
+          .where('id', existing.id)
+          .preload('members', (q) => q.preload('user'))
+          .firstOrFail()
+        const lastMsg = await Message.query()
+          .where('conversation_id', conv.id)
+          .preload('attachments')
+          .preload('sender')
+          .orderBy('id', 'desc')
+          .first()
+        const serializedMsg = lastMsg ? await messageService.serialize(lastMsg, me.id) : null
+        const serializedConv = {
+          ...conv.serialize(),
+          messages: serializedMsg ? [serializedMsg] : [],
+        }
+        return ApiResponse.ok(response, 'OK', { conversation: serializedConv })
+      }
+
+      const conv = await db.transaction(async (trx) => {
+        const c = await Conversation.create({ type: 'direct', createdBy: me.id }, { client: trx })
+        await ConversationMember.create(
+          { conversationId: c.id, userId: me.id, role: 'member' as const, joinedAt: DateTime.now() },
+          { client: trx }
+        )
+        return c
+      })
+
+      await conv.load('members', (q) => q.preload('user'))
+      await realtimeService.joinUserToConversation(me.id, conv)
+      realtimeService.emitToUser(me.id, 'conversation:joined', {
+        conversationId: conv.uuid,
+      })
+
+      return ApiResponse.created(response, 'Conversation created.', { conversation: conv })
     }
 
     // Find existing direct conversation
@@ -224,9 +278,19 @@ export default class ConversationsController {
       const conv = await Conversation.query()
         .where('id', existing.id)
         .preload('members', (q) => q.preload('user'))
-        .preload('messages', (q) => q.orderBy('id', 'desc').limit(1))
         .firstOrFail()
-      return ApiResponse.ok(response, 'OK', { conversation: conv })
+      const lastMsg = await Message.query()
+        .where('conversation_id', conv.id)
+        .preload('attachments')
+        .preload('sender')
+        .orderBy('id', 'desc')
+        .first()
+      const serializedMsg = lastMsg ? await messageService.serialize(lastMsg, me.id) : null
+      const serializedConv = {
+        ...conv.serialize(),
+        messages: serializedMsg ? [serializedMsg] : [],
+      }
+      return ApiResponse.ok(response, 'OK', { conversation: serializedConv })
     }
 
     const conv = await db.transaction(async (trx) => {
@@ -336,6 +400,38 @@ export default class ConversationsController {
     // Clean up duplicate AI conversations and messages older than 24 hours
     await chatbot.cleanupAiConversations(me.id)
 
+    // Clean up duplicate or invalid self-conversations
+    try {
+      const selfConvIds = await db
+        .from('conversation_members as m')
+        .join('conversations as c', 'c.id', 'm.conversation_id')
+        .where('c.type', 'direct')
+        .groupBy('m.conversation_id')
+        .havingRaw('sum(case when m.user_id = ? then 1 else 0 end) = count(*)', [me.id])
+        .select('m.conversation_id as id')
+      
+      const idsArray = selfConvIds.map((row) => row.id)
+      if (idsArray.length > 1) {
+        const withMessages = await db
+          .from('messages')
+          .whereIn('conversation_id', idsArray)
+          .groupBy('conversation_id')
+          .select('conversation_id')
+        
+        const withMsgSet = new Set(withMessages.map((row) => row.conversation_id))
+        let keptId = idsArray.find((id) => withMsgSet.has(id))
+        if (!keptId) keptId = idsArray[0]
+        
+        const toDelete = idsArray.filter((id) => id !== keptId)
+        if (toDelete.length > 0) {
+          await db.from('conversation_members').whereIn('conversation_id', toDelete).delete()
+          await db.from('conversations').whereIn('id', toDelete).delete()
+        }
+      }
+    } catch (err) {
+      // ignore
+    }
+
     const memberships = await ConversationMember.query().where('user_id', me.id)
     const ids = memberships.map((m) => m.conversationId)
     if (ids.length === 0) return ApiResponse.ok(response, 'OK', { conversations: [] })
@@ -354,16 +450,50 @@ export default class ConversationsController {
     const convs = await Conversation.query()
       .whereIn('id', filteredIds)
       .preload('members', (q) => q.preload('user'))
-      .preload('messages', (q) => q.orderBy('id', 'desc').limit(1))
       .orderBy('last_message_at', 'desc')
+
+    // Fetch the last message ID for each conversation to bypass the Lucid preload limit(1) bulk gotcha
+    const latestMessageRows = await db
+      .from('messages')
+      .whereIn('conversation_id', filteredIds)
+      .groupBy('conversation_id')
+      .select('conversation_id', db.raw('MAX(id) as last_message_id'))
+
+    const lastMessageIds = latestMessageRows
+      .map((row) => {
+        const idVal = row.last_message_id ?? row.last_message_id
+        return idVal ? Number(idVal) : null
+      })
+      .filter((id): id is number => id !== null)
+
+    const lastMessages = lastMessageIds.length > 0
+      ? await Message.query()
+          .whereIn('id', lastMessageIds)
+          .preload('attachments')
+          .preload('sender')
+      : []
+
+    const serializedMessagesMap = new Map<number, any>()
+    for (const m of lastMessages) {
+      const serialized = await messageService.serialize(m, me.id)
+      serializedMessagesMap.set(m.conversationId, serialized)
+    }
 
     const unreadMap = await computeUnreadCounts(me.id, filteredIds)
     const { blockedByMe, blockedByOther } = await computeDirectBlockStatus(me.id, convs)
     const friendshipMap = await computeDirectFriendshipStatus(me.id, convs)
+    const membershipMap = new Map(memberships.map((m) => [m.conversationId, m]))
     const out = convs.map((c) => {
       const friendship = friendshipMap.get(c.id)
+      const m = membershipMap.get(c.id)
+      const serializedMsg = serializedMessagesMap.get(c.id)
       return {
         ...c.serialize(),
+        messages: serializedMsg ? [serializedMsg] : [],
+        isPinned: m?.isPinned ?? false,
+        pinOrder: m?.pinOrder ?? null,
+        isMuted: m?.isMuted ?? false,
+        chatBackground: c.chatBackground ?? null,
         unreadCount: unreadMap.get(c.id) ?? 0,
         blockedByMe: blockedByMe.get(c.id) ?? false,
         blockedByOther: blockedByOther.get(c.id) ?? false,
@@ -372,6 +502,17 @@ export default class ConversationsController {
         friendRequestReceived: friendship?.friendRequestReceived ?? false,
         friendshipId: friendship?.friendshipId ?? null,
       }
+    })
+
+    out.sort((a: any, b: any) => {
+      if (a.isPinned && !b.isPinned) return -1
+      if (!a.isPinned && b.isPinned) return 1
+      if (a.isPinned && b.isPinned) {
+        return (b.pinOrder ?? 0) - (a.pinOrder ?? 0)
+      }
+      const timeA = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0
+      const timeB = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0
+      return timeB - timeA
     })
 
     return ApiResponse.ok(response, 'OK', { conversations: out })
@@ -397,8 +538,16 @@ export default class ConversationsController {
     const conv = await Conversation.query()
       .where('id', base.id)
       .preload('members', (q) => q.preload('user'))
-      .preload('messages', (q) => q.orderBy('id', 'desc').limit(1))
       .firstOrFail()
+
+    const lastMsg = await Message.query()
+      .where('conversation_id', conv.id)
+      .preload('attachments')
+      .preload('sender')
+      .orderBy('id', 'desc')
+      .first()
+
+    const serializedMsg = lastMsg ? await messageService.serialize(lastMsg, me.id) : null
 
     const unreadMap = await computeUnreadCounts(me.id, [conv.id])
     const { blockedByMe, blockedByOther } = await computeDirectBlockStatus(me.id, [conv])
@@ -406,6 +555,11 @@ export default class ConversationsController {
     const friendship = friendshipMap.get(conv.id)
     const out = {
       ...conv.serialize(),
+      messages: serializedMsg ? [serializedMsg] : [],
+      isPinned: member.isPinned ?? false,
+      pinOrder: member.pinOrder ?? null,
+      isMuted: member.isMuted ?? false,
+      chatBackground: conv.chatBackground ?? null,
       unreadCount: unreadMap.get(conv.id) ?? 0,
       blockedByMe: blockedByMe.get(conv.id) ?? false,
       blockedByOther: blockedByOther.get(conv.id) ?? false,
@@ -459,7 +613,7 @@ export default class ConversationsController {
 
     // Return the UUIDs of the actually-added users, not numeric ids.
     const addedUsers =
-      toAdd.length === 0 ? [] : await User.query().whereIn('id', toAdd).select('id', 'uuid')
+      toAdd.length === 0 ? [] : await User.query().whereIn('id', toAdd).select('id', 'uuid', 'name')
     const addedUuids = addedUsers.map((u) => u.uuid)
 
     // Realtime: make every newly-added user join the conv room and
@@ -468,6 +622,12 @@ export default class ConversationsController {
       await realtimeService.joinUserToConversation(u.id, conv)
       realtimeService.emitToUser(u.id, 'conversation:joined', {
         conversationId: conv.uuid,
+      })
+      await messageService.createMessage({
+        conversationId: conv.id,
+        senderId: me.id,
+        content: `__system__:added:${u.uuid}:${u.name || 'Người dùng'}`,
+        skipAiTrigger: true,
       })
     }
     // Existing members get a lighter signal so their member list
@@ -504,6 +664,13 @@ export default class ConversationsController {
     if (targetId === conv.ownerId) {
       return ApiResponse.error(response, 400, 'Cannot remove the owner.')
     }
+    await messageService.createMessage({
+      conversationId: conv.id,
+      senderId: me.id,
+      content: `__system__:removed:${target.uuid}:${target.name || 'Người dùng'}`,
+      skipAiTrigger: true,
+    })
+
     await ConversationMember.query()
       .where('conversation_id', conv.id)
       .andWhere('user_id', targetId)
@@ -544,6 +711,13 @@ export default class ConversationsController {
         'Owner must transfer ownership before leaving the group.'
       )
     }
+    await messageService.createMessage({
+      conversationId: conv.id,
+      senderId: me.id,
+      content: '__system__:left',
+      skipAiTrigger: true,
+    })
+
     await ConversationMember.query()
       .where('conversation_id', conv.id)
       .andWhere('user_id', me.id)
@@ -625,6 +799,65 @@ export default class ConversationsController {
     member.role = role
     await member.save()
     return ApiResponse.ok(response, 'Role updated.', { member })
+  }
+
+  /**
+   * @updateMemberNickname
+   * @operationId updateMemberNickname
+   * @description Sets or removes a nickname for a member in a conversation. Any member can change nicknames.
+   * @paramPath id - Conversation ID.
+   * @paramPath userId - Target user ID to set nickname for.
+   * @requestBody {"nickname": "string | null"}
+   * @responseBody 200 - {"success": true, "message": "string", "data": {"member": "object"}}
+   */
+  public async updateMemberNickname({ params, request, response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const conv = await resolveByUuid(params.id)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
+
+    // Validate that current user is a member of this conversation
+    const myMember = await ConversationMember.query()
+      .where('conversation_id', conv.id)
+      .andWhere('user_id', me.id)
+      .first()
+    if (!myMember) {
+      return ApiResponse.error(response, 403, 'Not a member of this conversation.')
+    }
+
+    // Find target user by UUID
+    const target = await User.findBy('uuid', params.userId)
+    if (!target) return ApiResponse.error(response, 404, 'User not found.')
+
+    // Validate target is a member
+    const targetMember = await ConversationMember.query()
+      .where('conversation_id', conv.id)
+      .andWhere('user_id', target.id)
+      .first()
+    if (!targetMember) {
+      return ApiResponse.error(response, 404, 'Target user is not a member of this conversation.')
+    }
+
+    const { nickname } = await request.validateUsing(updateMemberNicknameValidator)
+    const cleanNickname = nickname ? String(nickname).trim() : null
+
+    targetMember.nickname = cleanNickname
+    await targetMember.save()
+
+    // Realtime: notify sidebar and details pane to refetch
+    realtimeService.emitToConversation(conv.id, 'conversation:members-changed', {
+      conversationId: conv.uuid,
+    })
+
+    // Create system message: __system__:nickname-changed:targetUuid:newNickname
+    const systemContent = `__system__:nickname-changed:${target.uuid}:${cleanNickname || ''}`
+    await messageService.createMessage({
+      conversationId: conv.id,
+      senderId: me.id,
+      content: systemContent,
+      skipAiTrigger: true,
+    })
+
+    return ApiResponse.ok(response, 'Nickname updated.', { member: targetMember })
   }
 
   /**
@@ -813,6 +1046,11 @@ export default class ConversationsController {
     myMember.isMuted = !myMember.isMuted
     await myMember.save()
 
+    // Notify other sessions/devices of this user about the changed mute state
+    realtimeService.emitToUser(me.id, 'conversation:members-changed', {
+      conversationId: conv.uuid,
+    })
+
     return ApiResponse.ok(response, 'Mute status updated.', { isMuted: myMember.isMuted })
   }
 
@@ -842,12 +1080,17 @@ export default class ConversationsController {
         .andWhere('is_pinned', true)
         .max('pin_order as maxOrder')
         .first()
-      myMember.pinOrder = (maxOrder?.maxOrder ?? 0) + 1
+      myMember.pinOrder = (Number((maxOrder as any)?.$extras?.maxOrder) || 0) + 1
     } else {
       myMember.pinOrder = null
     }
     
     await myMember.save()
+
+    // Notify other sessions/devices of this user about the changed pin state
+    realtimeService.emitToUser(me.id, 'conversation:members-changed', {
+      conversationId: conv.uuid,
+    })
 
     return ApiResponse.ok(response, 'Pin status updated.', { isPinned: myMember.isPinned })
   }
@@ -988,6 +1231,13 @@ export default class ConversationsController {
       joinedAt: DateTime.now(),
     })
 
+    await messageService.createMessage({
+      conversationId: conv.id,
+      senderId: me.id,
+      content: '__system__:joined',
+      skipAiTrigger: true,
+    })
+
     await realtimeService.joinUserToConversation(me.id, conv)
     realtimeService.emitToUser(me.id, 'conversation:joined', {
       conversationId: conv.uuid,
@@ -1065,6 +1315,13 @@ export default class ConversationsController {
         joinedAt: DateTime.now(),
       })
 
+      await messageService.createMessage({
+        conversationId: conv.id,
+        senderId: requestObj.userId,
+        content: '__system__:joined',
+        skipAiTrigger: true,
+      })
+
       // Realtime trigger
       await realtimeService.joinUserToConversation(requestObj.userId, conv)
       realtimeService.emitToUser(requestObj.userId, 'conversation:joined', {
@@ -1104,5 +1361,35 @@ export default class ConversationsController {
     await requestObj.save()
 
     return ApiResponse.ok(response, 'Join request rejected.', null)
+  }
+
+  /**
+   * @updateBackground
+   * @operationId updateConversationBackground
+   * @description Updates the conversation background for the current user.
+   * @paramPath id - Conversation ID.
+   * @requestBody {"background": "string"}
+   * @responseBody 200 - {"success": true, "message": "string", "data": {"chatBackground": "string"}}
+   */
+  public async updateBackground({ params, request, response, auth }: HttpContext) {
+    const me = auth.use('jwt').getUserOrFail()
+    const conv = await resolveByUuid(params.id)
+    if (!conv) return ApiResponse.error(response, 404, 'Conversation not found.')
+
+    const member = await messageService.assertMember(conv.id, me.id)
+    if (!member) {
+      return ApiResponse.error(response, 403, 'Not a member of this conversation.')
+    }
+
+    const { background } = request.only(['background'])
+    conv.chatBackground = background || null
+    await conv.save()
+
+    // Notify ALL members of the conversation so everyone sees the same background
+    realtimeService.emitToConversation(conv.id, 'conversation:members-changed', {
+      conversationId: conv.uuid,
+    })
+
+    return ApiResponse.ok(response, 'Background updated.', { chatBackground: conv.chatBackground })
   }
 }

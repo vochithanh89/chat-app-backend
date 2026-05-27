@@ -5,7 +5,7 @@ import MailService from '#services/mail_service'
 import { DateTime } from 'luxon'
 import { userRegistrationValidator } from '#validators/user_registration'
 import { userLoginValidator } from '#validators/user_login'
-import { forgotPasswordValidator } from '#validators/forgot_password'
+import { forgotPasswordValidator, verifyResetOtpValidator } from '#validators/forgot_password'
 import { resetPasswordValidator } from '#validators/reset_password'
 import { verifyEmailValidator, resendOtpValidator } from '#validators/verify_email'
 import { changePasswordValidator } from '#validators/change_password'
@@ -56,7 +56,7 @@ export default class AuthController {
     }
 
     if (user.accountStatus === 'locked') {
-      return ApiResponse.error(response, 403, 'Your account has been locked. Contact support.')
+      return ApiResponse.error(response, 403, 'tài khoản của bạn đã bị khóa, hãy liên hệ với hỗ trợ viên để được mở khóa. tài khoản hỗ trợ viên: chatappN7@support.com')
     }
     // Determine the device category for session management.
     // mobile_android and mobile_ios are both treated as 'mobile' — only 1 web + 1 mobile allowed.
@@ -142,6 +142,9 @@ export default class AuthController {
   public async refresh({ response, auth }: HttpContext) {
     // The lib reads the refresh token from the Authorization header and rotates it.
     const user = await auth.use('jwt').authenticateWithRefreshToken()
+    if (user.accountStatus === 'locked') {
+      return ApiResponse.error(response, 403, 'tài khoản của bạn đã bị khóa, hãy liên hệ với hỗ trợ viên để được mở khóa. tài khoản hỗ trợ viên: chatappN7@support.com')
+    }
     const tokens = await auth.use('jwt').generate(user)
     const newRefreshToken = (user as any).currentToken as string | undefined
 
@@ -360,7 +363,7 @@ export default class AuthController {
   /**
    * @forgotPassword
    * @operationId forgotPassword
-   * @description Sends a password reset link/token to the user's email.
+   * @description Sends a password reset OTP to the user's email via SMTP.
    * @requestBody {"email": "string"}
    * @responseBody 200 - {"success": true, "message": "string", "data": {}}
    */
@@ -371,25 +374,66 @@ export default class AuthController {
     if (!user) {
       return ApiResponse.ok(
         response,
-        'If your email is registered, you will receive a password reset link.',
+        'Nếu email của bạn tồn tại trên hệ thống, một mã OTP xác thực sẽ được gửi đến hộp thư.',
         null
       )
     }
 
-    const token = randomBytes(32).toString('hex')
+    const otp = generateOtp()
+
+    // Delete existing reset tokens/OTPs for this email to avoid duplicates
+    await db.from('password_reset_tokens').where('email', user.email).delete()
+
     await db.table('password_reset_tokens').insert({
       email: user.email,
-      token,
+      token: otp,
       created_at: DateTime.now().toISO(),
     })
 
-    await (MailService as any).sendPasswordReset(user.email, token)
+    await MailService.sendForgotPasswordOTP(user.email, otp)
 
     return ApiResponse.ok(
       response,
-      'If your email is registered, you will receive a password reset link.',
+      'Nếu email của bạn tồn tại trên hệ thống, một mã OTP xác thực sẽ được gửi đến hộp thư.',
       null
     )
+  }
+
+  /**
+   * @verifyResetOtp
+   * @operationId verifyResetOtp
+   * @description Verifies the password reset OTP and generates a secure reset token.
+   * @requestBody {"email": "string", "otp": "string"}
+   * @responseBody 200 - {"success": true, "message": "string", "data": {"token": "string"}}
+   * @responseBody 400 - {"success": false, "message": "string", "errors": []}
+   */
+  public async verifyResetOtp({ request, response }: HttpContext) {
+    const { email, otp } = await request.validateUsing(verifyResetOtpValidator)
+
+    const resetRequest = await db
+      .from('password_reset_tokens')
+      .where('email', email)
+      .where('token', otp)
+      .first()
+
+    if (
+      !resetRequest ||
+      DateTime.fromISO(resetRequest.created_at).plus({ minutes: 5 }) < DateTime.now()
+    ) {
+      return ApiResponse.error(response, 400, 'Mã xác thực OTP không hợp lệ hoặc đã hết hạn.')
+    }
+
+    // OTP is valid! Delete it and generate a secure long-lived token (60 mins) for resetting the password
+    await db.from('password_reset_tokens').where('email', email).delete()
+
+    const secureToken = randomBytes(32).toString('hex')
+    await db.table('password_reset_tokens').insert({
+      email,
+      token: secureToken,
+      created_at: DateTime.now().toISO(),
+    })
+
+    return ApiResponse.ok(response, 'Xác thực mã OTP thành công.', { token: secureToken })
   }
 
   /**
