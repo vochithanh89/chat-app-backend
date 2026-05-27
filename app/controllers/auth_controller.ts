@@ -194,7 +194,8 @@ export default class AuthController {
       }
     }
 
-    await MailService.sendOTP(user.email, otp)
+    // Do not await so it runs in the background and does not block the response (critical for Render Free tier SMTP timeouts)
+    MailService.sendOTP(user.email, otp).catch(() => {})
 
     return ApiResponse.created(
       response,
@@ -351,7 +352,8 @@ export default class AuthController {
     const otp = generateOtp()
     user.verificationToken = otp
     await user.save()
-    await MailService.sendOTP(user.email, otp)
+    // Do not await so it runs in the background and does not block the response
+    MailService.sendOTP(user.email, otp).catch(() => {})
 
     return ApiResponse.ok(
       response,
@@ -390,7 +392,8 @@ export default class AuthController {
       created_at: DateTime.now().toISO(),
     })
 
-    await MailService.sendForgotPasswordOTP(user.email, otp)
+    // Do not await so it runs in the background and does not block the response
+    MailService.sendForgotPasswordOTP(user.email, otp).catch(() => {})
 
     return ApiResponse.ok(
       response,
