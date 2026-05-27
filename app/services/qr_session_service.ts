@@ -28,7 +28,7 @@ class QrSessionService {
       this.sessions.delete(sessionId)
       // dynamically import to prevent circular dependency
       const realtimeService = (await import('#services/realtime_service')).default
-      realtimeService.io.to(`qr:${sessionId}`).emit('qr:expired', {})
+      realtimeService.io?.to(`qr:${sessionId}`).emit('qr:expired', {})
     }, this.TTL)
 
     return session

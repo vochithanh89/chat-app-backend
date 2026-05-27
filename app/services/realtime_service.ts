@@ -29,7 +29,7 @@ interface AuthedSocket extends Socket {
  * payload, then auto-join personal + conversation rooms.
  */
 class RealtimeService {
-  private io: IOServer | null = null
+  public io: IOServer | null = null
   /** userId → count of currently open sockets for that user. */
   private connections = new Map<number, number>()
   private userPrivacySettings = new Map<number, boolean>()
@@ -86,15 +86,15 @@ class RealtimeService {
           (socket as AuthedSocket).data = { userId: 0 }
           return next()
         }
-        ;(socket as AuthedSocket).data = { userId }
-        // Capture device type from handshake auth (sent by client)
-        ;(socket as AuthedSocket).data.deviceType = socket.handshake.auth?.device_type || undefined
-        
+        ; (socket as AuthedSocket).data = { userId }
+          // Capture device type from handshake auth (sent by client)
+          ; (socket as AuthedSocket).data.deviceType = socket.handshake.auth?.device_type || undefined
+
         const user = await User.find(userId)
         if (user && user.accountStatus === 'locked') {
           return next(new Error('tài khoản của bạn đã bị khóa, hãy liên hệ với hỗ trợ viên để được mở khóa. tài khoản hỗ trợ viên: chatappN7@support.com'))
         }
-        
+
         next()
       } catch (err) {
         // If token fails verification, allow connection but mark unauthenticated
