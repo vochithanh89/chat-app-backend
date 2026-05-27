@@ -1022,6 +1022,13 @@ export default class ConversationsController {
       conversationId: conv.uuid,
     })
 
+    await messageService.createMessage({
+      conversationId: conv.id,
+      senderId: me.id,
+      content: '__system__:group-avatar-changed',
+      skipAiTrigger: true,
+    })
+
     await conv.load('members', (q) => q.preload('user'))
     return ApiResponse.ok(response, 'Group avatar updated.', { conversation: conv })
   }
@@ -1124,13 +1131,29 @@ export default class ConversationsController {
     if (approveMembers !== undefined) {
       conv.approveMembers = approveMembers
     }
+    let nameChanged = false
+    let newGroupName = ''
     if (name !== undefined) {
+      if (conv.name !== name) {
+        nameChanged = true
+        newGroupName = name
+      }
       conv.name = name
     }
     await conv.save()
     realtimeService.emitToConversation(conv.id, 'conversation:members-changed', {
       conversationId: conv.uuid,
     })
+
+    if (nameChanged) {
+      await messageService.createMessage({
+        conversationId: conv.id,
+        senderId: me.id,
+        content: `__system__:group-name-changed:${newGroupName}`,
+        skipAiTrigger: true,
+      })
+    }
+
     await conv.load('members', (q) => q.preload('user'))
     return ApiResponse.ok(response, 'Settings updated.', { conversation: conv })
   }
@@ -1388,6 +1411,13 @@ export default class ConversationsController {
     // Notify ALL members of the conversation so everyone sees the same background
     realtimeService.emitToConversation(conv.id, 'conversation:members-changed', {
       conversationId: conv.uuid,
+    })
+
+    await messageService.createMessage({
+      conversationId: conv.id,
+      senderId: me.id,
+      content: '__system__:group-bg-changed',
+      skipAiTrigger: true,
     })
 
     return ApiResponse.ok(response, 'Background updated.', { chatBackground: conv.chatBackground })
