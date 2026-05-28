@@ -98,9 +98,9 @@ export default class MessagesController {
       .if(deletedIds.length > 0, (q) => q.whereNotIn('id', deletedIds))
       .if(beforeCreatedAt && beforeId, (q) => {
         q.where((q2) => {
-          q2.where('created_at', '<', beforeCreatedAt!.toSQL())
+          q2.where('created_at', '<', beforeCreatedAt!.toSQL()!)
             .orWhere((q3) => {
-              q3.where('created_at', beforeCreatedAt!.toSQL())
+              q3.where('created_at', beforeCreatedAt!.toSQL()!)
                 .andWhere('id', '<', beforeId!)
             })
         })
