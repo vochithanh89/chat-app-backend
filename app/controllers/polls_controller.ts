@@ -200,10 +200,37 @@ export default class PollsController {
         options.map((o) => ({ pollOptionId: o.id, userId: me.id })),
         { client: trx }
       )
+
+      // Bump message and conversation
+      const now = DateTime.now()
+      await Message.query({ client: trx })
+        .where('id', poll.messageId)
+        .update({ createdAt: now.toSQL({ includeOffset: false }) })
+
+      await Conversation.query({ client: trx })
+        .where('id', poll.conversationId)
+        .update({ lastMessageAt: now.toSQL({ includeOffset: false }) })
     })
 
     const payload = await serializePoll(poll, me.id)
     realtime.emitToConversation(poll.conversationId, 'poll:updated', payload)
+    
+    // Broadcast message:new to bump the conversation on the frontend sidebar
+    const updatedMsg = await Message.find(poll.messageId)
+    if (updatedMsg) {
+      await updatedMsg.load((l) => l.load('sender').load('attachments').load('reactions'))
+      const serializedMsg = await messageService.serialize(updatedMsg)
+      serializedMsg.poll = payload // inject the updated poll payload
+      realtime.emitToConversation(poll.conversationId, 'message:new', serializedMsg)
+    }
+
+    await messageService.createMessage({
+      conversationId: poll.conversationId,
+      senderId: me.id,
+      content: `__system__:custom:${me.name || 'Thành viên'} đã tham gia bình chọn`,
+      skipAiTrigger: true,
+    })
+
     return ApiResponse.ok(response, 'Vote recorded.', { poll: payload })
   }
 
@@ -222,18 +249,47 @@ export default class PollsController {
     const member = await messageService.assertMember(poll.conversationId, me.id)
     if (!member) return ApiResponse.error(response, 403, 'Not a member.')
 
-    const optionIds = (await PollOption.query().where('poll_id', poll.id).select('id')).map(
-      (o) => o.id
-    )
-    if (optionIds.length > 0) {
-      await PollVote.query()
-        .whereIn('poll_option_id', optionIds)
-        .andWhere('user_id', me.id)
-        .delete()
-    }
+    await db.transaction(async (trx) => {
+      const optionIds = (await PollOption.query({ client: trx }).where('poll_id', poll.id).select('id')).map(
+        (o) => o.id
+      )
+      if (optionIds.length > 0) {
+        await PollVote.query({ client: trx })
+          .whereIn('poll_option_id', optionIds)
+          .andWhere('user_id', me.id)
+          .delete()
+      }
+
+      // Bump message and conversation
+      const now = DateTime.now()
+      await Message.query({ client: trx })
+        .where('id', poll.messageId)
+        .update({ createdAt: now.toSQL({ includeOffset: false }) })
+
+      await Conversation.query({ client: trx })
+        .where('id', poll.conversationId)
+        .update({ lastMessageAt: now.toSQL({ includeOffset: false }) })
+    })
 
     const payload = await serializePoll(poll, me.id)
     realtime.emitToConversation(poll.conversationId, 'poll:updated', payload)
+    
+    // Broadcast message:new to bump the conversation on the frontend sidebar
+    const updatedMsg = await Message.find(poll.messageId)
+    if (updatedMsg) {
+      await updatedMsg.load((l) => l.load('sender').load('attachments').load('reactions'))
+      const serializedMsg = await messageService.serialize(updatedMsg)
+      serializedMsg.poll = payload // inject the updated poll payload
+      realtime.emitToConversation(poll.conversationId, 'message:new', serializedMsg)
+    }
+
+    await messageService.createMessage({
+      conversationId: poll.conversationId,
+      senderId: me.id,
+      content: `__system__:custom:${me.name || 'Thành viên'} đã hủy bình chọn`,
+      skipAiTrigger: true,
+    })
+
     return ApiResponse.ok(response, 'Votes cleared.', { poll: payload })
   }
 
