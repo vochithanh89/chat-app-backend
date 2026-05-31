@@ -63,6 +63,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@vinejs/vine": "^3.0.1",
     "adonis-autoswagger": "^3.73.0",
+    "firebase": "^12.14.0",
     "firebase-admin": "^13.7.0",
     "jsonwebtoken": "^9.0.3",
     "luxon": "^3.7.2",
